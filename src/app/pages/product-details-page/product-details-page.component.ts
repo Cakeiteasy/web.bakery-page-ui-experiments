@@ -203,7 +203,7 @@ export class ProductDetailsPageComponent implements OnInit {
   }
 
   trackByImage(_index: number, image: IProductImageDto): string {
-    return image.small || image.original || `image-${_index}`;
+    return image.original || image.small || `image-${_index}`;
   }
 
   private async loadProductDetails(productId: number): Promise<void> {

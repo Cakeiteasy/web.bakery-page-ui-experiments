@@ -547,7 +547,7 @@ export class ProductsService {
       name: (product.name ?? '').trim(),
       descriptionText: this.toPlainText(product.description),
       containsAllergenNames: this.mapContainsAllergenNames(product.allergens),
-      imageUrl: this.normalizeImageUrl(product.image?.small ?? product.image?.original ?? ''),
+      imageUrl: this.normalizeImageUrl(product.image?.original ?? product.image?.small ?? ''),
       image: product.image,
       imageOrientation,
       sizes,
@@ -579,7 +579,7 @@ export class ProductsService {
       .map((image) => this.normalizeProductImage(image))
       .filter((image): image is NonNullable<typeof image> => Boolean(image));
     const defaultImage = normalizedImage ?? normalizedImages[0];
-    const imageUrl = this.normalizeImageUrl(defaultImage?.small ?? defaultImage?.original ?? '');
+    const imageUrl = this.normalizeImageUrl(defaultImage?.original ?? defaultImage?.small ?? '');
     const variants = this.mapProductDetailsVariants(product, structureType, increment, minQuantity, maxQuantity);
     const currencySymbol =
       product.bakery?.country?.currency_symbol ?? product.bakery?.country?.currencySymbol ?? 'kr';
@@ -673,7 +673,7 @@ export class ProductsService {
           minQuantity: sizeMinQuantity,
           maxQuantity: sizeMaxQuantity,
           isPiecesLike: Boolean(sizeIsPiecesLike),
-          imageUrl: this.normalizeImageUrl(image?.small ?? image?.original ?? ''),
+          imageUrl: this.normalizeImageUrl(image?.original ?? image?.small ?? ''),
           order: fallbackOrder
         });
         fallbackOrder += 1;
@@ -873,10 +873,10 @@ export class ProductsService {
   private resolveDetailsVariantLabel(
     variant:
       | {
-          name?: string;
-          product_number?: string | null;
-          variant?: { name?: string } | null;
-        }
+      name?: string;
+      product_number?: string | null;
+      variant?: { name?: string } | null;
+    }
       | null
       | undefined,
     fallbackIndex: number
