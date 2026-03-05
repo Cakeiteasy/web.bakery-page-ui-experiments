@@ -1,0 +1,67 @@
+<ng-template #panelContent>
+  <section class="panel-section" *ngIf="allergens.length || hasProductGroups">
+    <h3>Allergens</h3>
+    <div class="items" *ngIf="allergens.length">
+      <app-allergen-group
+        *ngFor="let allergen of allergens; trackBy: trackById"
+        [allergen]="allergen"
+        [checked]="isAllergenChecked(allergen.id)"
+        (toggled)="toggleAllergen($event)"
+      />
+    </div>
+
+    <div class="groups-inside-allergens" *ngIf="hasProductGroups">
+      <h4>Groups</h4>
+      <div class="items">
+        <app-group-filter
+          *ngFor="let group of filters?.productGroups; trackBy: trackById"
+          [group]="group"
+          [checked]="isProductGroupChecked(group.id)"
+          (toggled)="toggleProductGroup($event)"
+        />
+      </div>
+    </div>
+  </section>
+
+  <section class="panel-section" *ngIf="filters?.canHasMotive">
+    <h3>Motive</h3>
+    <div class="motive-toggle">
+      <button
+        type="button"
+        [class.active]="activeFilters.motive === 'with'"
+        (click)="selectMotive('with')"
+      >
+        Med motiv
+      </button>
+      <button
+        type="button"
+        [class.active]="activeFilters.motive === 'without'"
+        (click)="selectMotive('without')"
+      >
+        Uten motiv
+      </button>
+    </div>
+  </section>
+</ng-template>
+
+<aside class="filter-panel desktop-panel" aria-label="Filters">
+  <ng-container *ngTemplateOutlet="panelContent"></ng-container>
+</aside>
+
+<button
+  type="button"
+  class="mobile-filter-toggle"
+  (click)="openMobileSheet()"
+>
+  Filters
+</button>
+
+<div class="mobile-backdrop" *ngIf="mobileSheetOpen" (click)="closeMobileSheet()"></div>
+
+<aside class="filter-sheet" [class.open]="mobileSheetOpen" aria-label="Mobile filters">
+  <div class="sheet-header">
+    <h3>Filters</h3>
+    <button type="button" (click)="closeMobileSheet()">Close</button>
+  </div>
+  <ng-container *ngTemplateOutlet="panelContent"></ng-container>
+</aside>

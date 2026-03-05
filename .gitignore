@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+output/
+out/
+
+# Angular cache
+.angular/
+.angular/cache/
+
+# Vercel
+.vercel/
+
+# Test and automation artifacts
+.playwright-cli/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local workspace notes
+memory.md

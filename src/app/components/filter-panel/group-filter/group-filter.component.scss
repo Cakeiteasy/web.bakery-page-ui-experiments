@@ -1,0 +1,14 @@
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.group-row input {
+  inline-size: 1rem;
+  block-size: 1rem;
+  accent-color: var(--primary);
+}

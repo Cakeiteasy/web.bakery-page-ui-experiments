@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/web-shop-expo/browser",
+  "rewrites": [
+    {
+      "source": "/rosenborg-api/:path*",
+      "destination": "https://www.rosenborgbakeri.no/shop/api/:path*"
+    },
+    {
+      "source": "/maschmanns-api/:path*",
+      "destination": "https://www.maschmanns.no/shop/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

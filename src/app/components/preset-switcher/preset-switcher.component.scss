@@ -1,0 +1,114 @@
+.preset-switcher {
+  position: fixed;
+  top: auto;
+  right: calc(env(safe-area-inset-right, 0px) + 1rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+  z-index: 40;
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.55rem;
+  max-width: min(92vw, 560px);
+  padding: 0.52rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-lg, 0.8rem);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.15);
+}
+
+.switcher-section {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.switcher-label {
+  display: block;
+  margin: 0 0 0.24rem;
+  color: var(--text-muted);
+  font-size: 0.63rem;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bakery-select {
+  min-height: 1.95rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  background: var(--page-bg);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0 0.65rem;
+}
+
+.switcher-divider {
+  display: inline-flex;
+  align-items: flex-end;
+  padding-bottom: 0.38rem;
+  font-size: 0.88rem;
+  color: color-mix(in srgb, var(--text-primary) 40%, transparent);
+  user-select: none;
+}
+
+.preset-buttons {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.preset-button {
+  border: 1px solid var(--border);
+  background: var(--page-bg);
+  color: var(--text-primary);
+  border-radius: var(--radius-pill, 999px);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.preset-button:hover {
+  transform: translateY(-1px);
+}
+
+.preset-button.active {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: transparent;
+}
+
+@media (max-width: 767px) {
+  .preset-switcher {
+    right: calc(env(safe-area-inset-right, 0px) + 0.7rem);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 0.7rem);
+    max-width: min(94vw, 390px);
+    padding: 0.35rem;
+    gap: 0.45rem;
+  }
+
+  .switcher-label {
+    font-size: 0.58rem;
+  }
+
+  .switcher-divider {
+    padding-bottom: 0.32rem;
+  }
+
+  .preset-button {
+    padding: 0.32rem 0.62rem;
+    font-size: 0.7rem;
+  }
+
+  .bakery-select {
+    min-height: 1.8rem;
+    font-size: 0.7rem;
+    padding-inline: 0.55rem;
+  }
+}

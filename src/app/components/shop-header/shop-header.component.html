@@ -1,0 +1,93 @@
+<header class="shop-header">
+  <div class="brand-block">
+    <a
+      class="logo-link"
+      *ngIf="logoUrl"
+      [attr.href]="websiteUrl || null"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Bakery website"
+    >
+      <img class="logo" [src]="logoUrl" [alt]="bakeryName + ' logo'" />
+    </a>
+
+    <a
+      *ngIf="websiteUrl; else plainBrandName"
+      class="brand-name brand-name-link"
+      [href]="websiteUrl"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {{ bakeryName }}
+    </a>
+    <ng-template #plainBrandName>
+      <span class="brand-name">{{ bakeryName }}</span>
+    </ng-template>
+  </div>
+
+  <div class="actions-block">
+    <nav class="header-links" *ngIf="headerLinks.length">
+      <ng-container *ngFor="let link of headerLinks; trackBy: trackByLink">
+        <a
+          *ngIf="link.url; else plainLink"
+          class="header-link"
+          [href]="link.url"
+        >
+          {{ link.text }}
+        </a>
+        <ng-template #plainLink>
+          <span class="header-link muted">{{ link.text }}</span>
+        </ng-template>
+      </ng-container>
+    </nav>
+
+    <label class="search-box">
+      <span class="search-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false">
+          <circle cx="11" cy="11" r="6.5"></circle>
+          <path d="M16 16l5 5"></path>
+        </svg>
+      </span>
+      <input
+        type="search"
+        [value]="searchQuery"
+        (input)="onSearchInput($event)"
+        placeholder="Søk produkter"
+        aria-label="Search products"
+      />
+    </label>
+
+    <div class="cart-wrap">
+      <button
+        type="button"
+        class="cart-button"
+        aria-haspopup="dialog"
+        [attr.aria-expanded]="cartOpen()"
+        [attr.aria-label]="cartAriaLabel"
+        (click)="toggleCart($event)"
+      >
+        <svg class="cart-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M7 5h14l-1.3 6.2a2 2 0 0 1-2 1.6H10.1a2 2 0 0 1-2-1.5L6.2 3.8A1 1 0 0 0 5.2 3H3"/>
+          <circle cx="10" cy="19" r="1.6"/>
+          <circle cx="17" cy="19" r="1.6"/>
+        </svg>
+        <span class="cart-badge" *ngIf="cartQuantity > 0" role="status" aria-live="polite">{{ cartBadgeText }}</span>
+      </button>
+
+      <section class="cart-popup" *ngIf="cartOpen()" role="dialog" aria-label="Handlekurv">
+        <p class="cart-title">Handlekurv</p>
+
+        <p class="cart-empty" *ngIf="!cartItems.length">Ingen varer valgt ennå.</p>
+
+        <ul class="cart-items" *ngIf="cartItems.length">
+          <li *ngFor="let item of cartItems; trackBy: trackByCartItem">
+            <span class="item-name">{{ item.name }}</span>
+            <span class="item-qty">x{{ item.quantity }}</span>
+          </li>
+        </ul>
+
+        <p class="cart-total" *ngIf="cartItems.length">Totalt {{ cartQuantity }} stk</p>
+      </section>
+    </div>
+  </div>
+</header>

@@ -1,0 +1,27 @@
+<div class="preset-switcher" aria-label="Bakery switcher and preset selector">
+  <div class="switcher-section">
+    <label class="switcher-label" for="bakery-switcher">Bakery</label>
+    <select id="bakery-switcher" class="bakery-select" [value]="activeBakery" (change)="onBakerySelect($event)">
+      <option *ngFor="let bakery of bakeries; trackBy: trackByBakery" [value]="bakery.key">
+        {{ bakery.name }}
+      </option>
+    </select>
+  </div>
+
+  <span class="switcher-divider" aria-hidden="true">|</span>
+
+  <div class="switcher-section">
+    <span class="switcher-label">Presets</span>
+    <div class="preset-buttons" aria-label="Preset selector">
+      <button
+        type="button"
+        class="preset-button"
+        *ngFor="let preset of presets"
+        [class.active]="preset.key === activePreset"
+        (click)="selectPreset(preset.key)"
+      >
+        {{ preset.label }}
+      </button>
+    </div>
+  </div>
+</div>

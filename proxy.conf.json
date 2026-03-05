@@ -1,0 +1,18 @@
+{
+  "/rosenborg-api": {
+    "target": "https://www.rosenborgbakeri.no",
+    "changeOrigin": true,
+    "secure": true,
+    "pathRewrite": {
+      "^/rosenborg-api": "/shop/api"
+    }
+  },
+  "/maschmanns-api": {
+    "target": "https://www.maschmanns.no",
+    "changeOrigin": true,
+    "secure": true,
+    "pathRewrite": {
+      "^/maschmanns-api": "/shop/api"
+    }
+  }
+}

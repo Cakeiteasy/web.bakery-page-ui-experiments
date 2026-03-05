@@ -1,0 +1,4 @@
+<label class="allergen-row" [class.child]="allergen.showAsChild">
+  <input type="checkbox" [checked]="checked" (change)="toggle()" />
+  <span>{{ allergen.name }}</span>
+</label>

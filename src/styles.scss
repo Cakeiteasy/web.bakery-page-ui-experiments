@@ -1,0 +1,41 @@
+:root {
+  --primary: #00dac7;
+  --secondary: #fa6400;
+  --page-bg: #ffffff;
+  --surface: #f6f6f6;
+  --text-primary: #333333;
+  --text-muted: #6c757d;
+  --border: #dcdcdc;
+  --on-primary: #111111;
+  --on-secondary: #ffffff;
+  --header-bg: #ffffff;
+  --header-text: #111111;
+  --footer-bg: #222222;
+  --footer-text: #ffffff;
+  --hero-accent: #00dac7;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--page-bg);
+  color: var(--text-primary);
+  font-family: var(--font-body, 'Inter', 'Segoe UI', sans-serif);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}

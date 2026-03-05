@@ -1,0 +1,64 @@
+<article
+  class="product-card"
+  [class.list-mode]="isListMode"
+  [class.has-hover-motion]="hasHoverMotion"
+  [class.uppercase-cta]="cardsConfig.cta.uppercaseLabels"
+  [class.blur-overlay]="cardsConfig.overlay.blurOnHover"
+  [class]="cardAnimationClass"
+  [style.animation-delay.ms]="animationDelayMs"
+  [style.animation-duration.ms]="animationDurationMs"
+  [style.background]="cardsConfig.frame?.bgColor || 'transparent'"
+  [style.border-color]="cardsConfig.frame?.borderColor || 'transparent'"
+  [style.border-width.px]="cardsConfig.frame?.borderWidthPx || 0"
+  [style.box-shadow]="cardShadow"
+  [style.padding.px]="cardsConfig.frame?.paddingPx || 0"
+  (pointermove)="onPointerMove($event)"
+  (pointerleave)="onPointerLeave()"
+>
+  <div
+    class="image-shell"
+    [class.contain-mode]="mediaObjectFit === 'contain'"
+    [style.border-radius.px]="cardsConfig.image.cornerRadiusPx"
+    [style.aspect-ratio]="mediaAspectRatio"
+  >
+    <div class="badge-row" *ngIf="badges.length">
+      <span class="top-badge" *ngFor="let badge of badges; trackBy: trackByBadge">{{ badge.label }}</span>
+    </div>
+
+    <img
+      class="product-image"
+      [src]="product.imageUrl"
+      [alt]="product.name"
+      [style.object-fit]="mediaObjectFit"
+      [style.transform]="imageTransform"
+    />
+
+    <div
+      class="image-overlay"
+      *ngIf="hasFullOverlay"
+      [style.opacity]="overlayOpacity"
+    ></div>
+  </div>
+
+  <div class="details">
+    <h3 class="product-title">{{ product.name }}</h3>
+    <p class="bakery-name" *ngIf="product.bakeryName">{{ product.bakeryName }}</p>
+
+    <div class="footer-row">
+      <p class="price">
+        <span class="price-prefix" *ngIf="showFromLabel">Fra</span>
+        <span class="price-value">{{ priceAmountText }}</span>
+      </p>
+
+      <div class="actions">
+        <div class="piece-counter" *ngIf="showPieceCounter">
+          <button type="button" (click)="onDecreasePieceQty()">-</button>
+          <span>{{ quantity }}</span>
+          <button type="button" (click)="onIncreasePieceQty()">+</button>
+        </div>
+
+        <button type="button" class="cta-button" (click)="onViewProduct()">{{ ctaText }}</button>
+      </div>
+    </div>
+  </div>
+</article>
