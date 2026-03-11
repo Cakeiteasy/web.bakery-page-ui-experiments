@@ -40,3 +40,5 @@ Thumbs.db
 
 # Local workspace notes
 memory.md
+.vercel
+.env*.local

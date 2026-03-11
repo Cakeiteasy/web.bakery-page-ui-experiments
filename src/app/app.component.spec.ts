@@ -261,4 +261,16 @@ describe('AppComponent', () => {
     expect(fixture.nativeElement.querySelector('app-filter-panel')).toBeNull();
     expect(fixture.nativeElement.querySelector('.view-toggle')).toBeNull();
   });
+
+  it('hides global shell when build-with-ai route mode is active', async () => {
+    (component as any).buildWithAiMode.set(true);
+
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('app-preset-switcher')).toBeNull();
+    expect(fixture.nativeElement.querySelector('app-shop-header')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.build-with-ai-route-shell')).not.toBeNull();
+  });
 });

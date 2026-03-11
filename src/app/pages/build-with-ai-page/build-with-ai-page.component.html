@@ -1,0 +1,149 @@
+<div class="build-with-ai-page" *ngIf="!loading(); else loadingState" [style.--chat-pane-width.px]="sidebarWidth()">
+  <div
+    class="sidebar-resize-overlay"
+    *ngIf="sidebarResizing()"
+    (pointermove)="onSidebarResizePointerMove($event)"
+    (pointerup)="onSidebarResizePointerUp()"
+    (pointercancel)="onSidebarResizePointerUp()"
+    (pointerleave)="onSidebarResizePointerUp()"
+  ></div>
+
+  <div class="build-with-ai-page__workspace">
+    <section class="preview-pane" [class.preview-pane--busy]="processing()">
+      <div class="preview-frame-wrap">
+        <iframe
+          title="Build with AI preview"
+          class="preview-frame"
+          [attr.srcdoc]="safePreviewDocument()"
+          sandbox="allow-scripts"
+        ></iframe>
+
+        <div class="preview-overlay" *ngIf="processing()">
+          <div class="spinner"></div>
+          <p>Applying AI changes...</p>
+        </div>
+      </div>
+    </section>
+
+    <aside
+      class="chat-pane"
+      [class.chat-pane--dragging]="dragActive()"
+      (drop)="onDrop($event)"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)"
+    >
+      <div class="chat-pane__resizer" (pointerdown)="onSidebarResizeStart($event)"></div>
+
+      <header class="chat-pane__header">
+        <div class="chat-pane__title">
+          <p class="chat-pane__eyebrow">AI Controls</p>
+          <h2>Patch Generator</h2>
+        </div>
+
+        <button type="button" class="ghost-button ghost-button--small" (click)="onStartNewSession()">
+          Start new session
+        </button>
+      </header>
+
+      <p class="status-banner status-banner--chat status-banner--error" *ngIf="activeError() as error">
+        <strong>{{ error.category | titlecase }}:</strong>
+        {{ error.message }}
+      </p>
+
+      <p class="status-banner status-banner--chat status-banner--warning" *ngIf="contextWarningText()">
+        {{ contextWarningText() }}
+      </p>
+
+      <section class="messages" aria-label="Chat history">
+        <article
+          *ngFor="let message of messages(); trackBy: trackByMessage"
+          class="message"
+          [class.message--user]="message.role === 'user'"
+          [class.message--assistant]="message.role === 'assistant'"
+          [class.message--error]="message.errorCategory"
+        >
+          <p class="message__meta">{{ message.role === 'user' ? 'You' : 'AI' }}</p>
+          <p class="message__text">{{ message.text }}</p>
+
+          <ul class="message__attachments" *ngIf="message.attachments.length">
+            <li *ngFor="let attachment of message.attachments">
+              <span>{{ attachment.name }}</span>
+              <small>{{ (attachment.sizeBytes / 1024) | number: '1.0-0' }} KB</small>
+            </li>
+          </ul>
+        </article>
+      </section>
+
+      <form class="composer" (submit)="$event.preventDefault(); onSend()">
+        <p class="composer__hint">Drop images here or use upload. Images are sent as vision context.</p>
+
+        <div class="composer__pending" *ngIf="pendingAttachments().length">
+          <button
+            type="button"
+            class="pending-pill"
+            *ngFor="let attachment of pendingAttachments()"
+            (click)="removePendingAttachment(attachment.id)"
+          >
+            <span>{{ attachment.name }}</span>
+            <small>remove</small>
+          </button>
+        </div>
+
+        <textarea
+          #composerTextarea
+          rows="2"
+          [ngModel]="draftMessage()"
+          (ngModelChange)="onDraftChanged($event)"
+          (input)="onTextareaInput($event)"
+          (keydown)="onComposerKeydown($event)"
+          name="prompt"
+          placeholder="Describe the change you want in the content section..."
+        ></textarea>
+
+        <div class="composer__actions">
+          <div class="composer__actions-left">
+            <label class="upload-button">
+              Add image
+              <input type="file" accept="image/*" multiple (change)="onFileInputChange($event)" />
+            </label>
+
+            <label class="model-select">
+              <select
+                aria-label="Model selection"
+                name="model"
+                [ngModel]="selectedModel().key"
+                (ngModelChange)="onModelChanged($event)"
+              >
+                <option *ngFor="let model of modelOptions" [ngValue]="model.key">{{ model.label }}</option>
+              </select>
+            </label>
+          </div>
+
+          <button type="submit" [disabled]="!canSend()">Apply changes</button>
+        </div>
+      </form>
+
+      <details class="patch-log" *ngIf="patchLogs().length">
+        <summary>Patch log ({{ patchLogs().length }})</summary>
+
+        <ul>
+          <li *ngFor="let log of patchLogs(); trackBy: trackByPatchLog">
+            <strong [class.ok]="log.status === 'applied'" [class.err]="log.status === 'rejected'">
+              {{ log.status | uppercase }}
+            </strong>
+            <span>{{ log.details }}</span>
+          </li>
+        </ul>
+      </details>
+    </aside>
+  </div>
+</div>
+
+<ng-template #loadingState>
+  <div class="build-with-ai-page build-with-ai-page--loading">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <p>Loading build-with-ai workspace...</p>
+    </div>
+  </div>
+</ng-template>

@@ -13,6 +13,7 @@ Angular 17 storefront prototype for bakery product discovery and product detail 
 
 - Category-driven products overview
 - Product details route: `/products/:productId`
+- AI page-builder demo route: `/build-with-ai`
 - Shared cart quantity state across overview and details pages
 - Bakery switching (`Rosenborg`, `Maschmanns`)
 - UI preset switching
@@ -47,6 +48,18 @@ npm start          # Angular dev server with proxy.conf.json
 npm run build      # Production build
 npm test           # Unit tests (headless Chrome)
 ```
+
+## Build-With-AI Demo
+
+Route: `/build-with-ai`
+
+This demo renders fixed header/footer and lets AI patch only the middle section (`content.html`, `content.css`, `content.js`) using unified diffs.
+
+For Vercel API route `/api/build-with-ai`, configure:
+
+- `OPENAI_API_KEY`
+- `GOOGLE_GENERATIVE_AI_API_KEY`
+- `BUILD_WITH_AI_DEMO_KEY` (required by `x-demo-key` request header from the UI)
 
 ## Deployment (Vercel)
 

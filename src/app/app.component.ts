@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, inject, OnInit, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { filter } from 'rxjs';
 
 import { PresetSwitcherComponent } from './components/preset-switcher/preset-switcher.component';
 import { ShopHeaderComponent } from './components/shop-header/shop-header.component';
@@ -26,12 +27,22 @@ export class AppComponent implements OnInit {
   readonly bakeryBrandingService = inject(BakeryBrandingService);
   readonly productsService = inject(ProductsService);
   readonly uiConfigService = inject(UiConfigService);
+  readonly router = inject(Router);
   readonly bakeryOptions = BAKERY_OPTIONS;
   readonly activeBakery = getActiveBakeryOption();
 
   readonly presetOptions = this.uiConfigService.presetOptions;
   readonly currentYear = new Date().getFullYear();
   readonly brandingSettled = signal(false);
+  readonly buildWithAiMode = signal(this.isBuildWithAiUrl(this.router.url));
+
+  constructor() {
+    this.router.events
+      .pipe(filter((event): event is NavigationEnd => event instanceof NavigationEnd))
+      .subscribe((event) => {
+        this.buildWithAiMode.set(this.isBuildWithAiUrl(event.urlAfterRedirects));
+      });
+  }
 
   ngOnInit(): void {
     this.uiConfigService.setPreset(this.activeBakery.defaultPreset);
@@ -119,6 +130,10 @@ export class AppComponent implements OnInit {
 
   get cartItems(): ICartItem[] {
     return this.productsService.cartItems();
+  }
+
+  private isBuildWithAiUrl(url: string): boolean {
+    return url === '/build-with-ai' || url.startsWith('/build-with-ai?') || url.startsWith('/build-with-ai/');
   }
 
   private async loadBranding(): Promise<void> {
