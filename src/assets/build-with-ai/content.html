@@ -1,64 +1,317 @@
-<section class="hero-card">
-  <div class="hero-card__copy">
-    <p class="eyebrow">Build With AI</p>
-    <h1>Design and iterate your landing section with chat</h1>
-    <p class="lead">
-      Ask for layout or copy updates, and the middle content updates instantly while header and footer remain fixed.
-    </p>
-    <div class="hero-card__actions">
-      <a href="#feature-grid" class="btn btn--primary">Explore Components</a>
-      <a href="#faq" class="btn btn--ghost">See FAQ</a>
+<!-- HERO -->
+<section class="lp-hero">
+  <div class="lp-hero__inner">
+    <div class="lp-hero__copy">
+      <p class="lp-eyebrow">Norway's #1 Cake Platform</p>
+      <h1 class="lp-hero__h1">The perfect cake,<br><em>from a local bakery.</em></h1>
+      <p class="lp-hero__sub">Order handcrafted cakes from 500+ trusted bakeries across Norway and Sweden — at the same price as walking in. No markups, no hassle.</p>
+      <div class="lp-hero__cta-row">
+        <a href="#" class="lp-btn lp-btn--primary">Find cakes near you</a>
+        <div class="lp-hero__rating">
+          <span class="lp-stars">★★★★★</span>
+          <span><strong>4.8</strong> · 12,000+ reviews</span>
+        </div>
+      </div>
+    </div>
+    <div class="lp-hero__visual">
+      <div class="lp-hero__img-wrap">
+        <img src="https://images.unsplash.com/photo-1535141192574-5d4897c12636?auto=format&fit=crop&w=900&q=85" alt="Elegant celebration cake" />
+        <div class="lp-hero__float-card">
+          <div class="lp-hero__float-icon">🎂</div>
+          <div>
+            <strong>200,000+ orders placed</strong>
+            <span>and counting</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
-  <div class="hero-card__media">
-    <img
-      src="https://images.unsplash.com/photo-1523293182086-7651a899d37f?auto=format&fit=crop&w=1200&q=80"
-      alt="Decorated cake"
-    />
+</section>
+
+<!-- TRUST BAR -->
+<section class="lp-trust">
+  <div class="lp-trust__inner">
+    <p class="lp-trust__label">Bakeries on the platform</p>
+    <div class="lp-trust__logos">
+      <span class="lp-trust__logo-item">Rosenborgbakeri</span>
+      <span class="lp-trust__sep">·</span>
+      <span class="lp-trust__logo-item">Maschmanns</span>
+      <span class="lp-trust__sep">·</span>
+      <span class="lp-trust__logo-item">Conditori La Princesse</span>
+      <span class="lp-trust__sep">·</span>
+      <span class="lp-trust__logo-item">Baker Hansen</span>
+      <span class="lp-trust__sep">·</span>
+      <span class="lp-trust__logo-item">+ 500 more</span>
+    </div>
   </div>
 </section>
 
-<section id="feature-grid" class="feature-grid">
-  <article class="feature-card">
-    <h2>Patch-based updates</h2>
-    <p>Every change request is applied through a unified diff and verified before rendering.</p>
-  </article>
-  <article class="feature-card">
-    <h2>Live preview</h2>
-    <p>The editable section renders inside a sandboxed frame for safe and immediate feedback.</p>
-  </article>
-  <article class="feature-card">
-    <h2>Model flexibility</h2>
-    <p>Switch between providers from the chat sidebar and compare outputs quickly.</p>
-  </article>
-</section>
-
-<section class="stats-row" aria-label="Key metrics">
-  <div>
-    <strong data-counter="128">128</strong>
-    <span>patches applied</span>
-  </div>
-  <div>
-    <strong data-counter="4.8">4.8</strong>
-    <span>avg quality rating</span>
-  </div>
-  <div>
-    <strong data-counter="300">300+</strong>
-    <span>components generated</span>
+<!-- STATS BAR -->
+<section class="lp-stats-bar">
+  <div class="lp-stats-bar__inner">
+    <div class="lp-stat-item">
+      <strong class="lp-stat__num" data-counter="200000">200,000+</strong>
+      <span>cakes ordered</span>
+    </div>
+    <div class="lp-stat-item__divider" aria-hidden="true"></div>
+    <div class="lp-stat-item">
+      <strong class="lp-stat__num" data-counter="500">500+</strong>
+      <span>local bakeries</span>
+    </div>
+    <div class="lp-stat-item__divider" aria-hidden="true"></div>
+    <div class="lp-stat-item">
+      <strong class="lp-stat__num" data-counter="4.8">4.8</strong>
+      <span>average rating</span>
+    </div>
+    <div class="lp-stat-item__divider" aria-hidden="true"></div>
+    <div class="lp-stat-item">
+      <strong class="lp-stat__num">0 kr</strong>
+      <span>extra fees</span>
+    </div>
   </div>
 </section>
 
-<section id="faq" class="faq-list">
-  <details open>
-    <summary>Can I edit only this middle section?</summary>
-    <p>Yes. Header and footer are locked constants in this experiment.</p>
-  </details>
-  <details>
-    <summary>Can AI add images?</summary>
-    <p>Yes. Provide an image URL or drag and drop an image into the chat.</p>
-  </details>
-  <details>
-    <summary>What happens on syntax errors?</summary>
-    <p>Invalid HTML/CSS/JS changes are rejected with clear feedback before rendering.</p>
-  </details>
+<!-- HOW IT WORKS -->
+<section class="lp-how" id="how-it-works">
+  <div class="lp-how__inner">
+    <div class="lp-how__header">
+      <p class="lp-eyebrow">How it works</p>
+      <h2>From browse to doorstep<br>in three simple steps.</h2>
+    </div>
+    <div class="lp-how__steps">
+
+      <!-- Step 1 -->
+      <div class="lp-step">
+        <div class="lp-step__illo" aria-hidden="true">
+          <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="80" height="80" rx="20" fill="#fff0f7"/>
+            <!-- Cake bottom tier -->
+            <rect x="18" y="50" width="36" height="11" rx="3.5" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Cake middle tier -->
+            <rect x="22" y="39" width="28" height="11" rx="3.5" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Cake top tier -->
+            <rect x="26" y="28" width="20" height="11" rx="3.5" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Frosting swiggle on bottom -->
+            <path d="M22 50 Q25 46 28 50 Q31 46 34 50 Q37 46 40 50 Q43 46 46 50 Q49 46 52 50" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <!-- Candle -->
+            <rect x="35" y="21" width="3.5" height="7" rx="1.5" fill="#c89b5a"/>
+            <!-- Flame -->
+            <path d="M36.75 21 C34 18 35 13 36.75 15 C38.5 13 39.5 18 36.75 21Z" fill="#ff6bbf"/>
+            <!-- Magnifying glass -->
+            <circle cx="57" cy="26" r="9.5" fill="white" fill-opacity="0.9" stroke="#ff3399" stroke-width="2"/>
+            <line x1="63.7" y1="32.7" x2="69" y2="38" stroke="#ff3399" stroke-width="2.5" stroke-linecap="round"/>
+            <!-- Sparkle dots -->
+            <circle cx="18" cy="22" r="2" fill="#ffd9ec"/>
+            <circle cx="14" cy="30" r="1.5" fill="#ff3399" opacity="0.3"/>
+          </svg>
+        </div>
+        <div class="lp-step__num">01</div>
+        <div class="lp-step__body">
+          <h3>Browse & customise</h3>
+          <p>Search by location, occasion, or dietary need. Pick size, flavour, and add a personal message.</p>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="lp-step">
+        <div class="lp-step__illo" aria-hidden="true">
+          <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="80" height="80" rx="20" fill="#fff0f7"/>
+            <!-- Building body -->
+            <rect x="12" y="36" width="50" height="32" rx="4" fill="white" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Awning -->
+            <path d="M8 36 Q37 22 68 36" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5" stroke-linejoin="round"/>
+            <!-- Door -->
+            <rect x="31" y="50" width="14" height="18" rx="3" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Door knob -->
+            <circle cx="42" cy="60" r="1.5" fill="#c89b5a"/>
+            <!-- Left window -->
+            <rect x="15" y="42" width="13" height="11" rx="2.5" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Window cross -->
+            <line x1="21.5" y1="42" x2="21.5" y2="53" stroke="#ff3399" stroke-width="1" opacity="0.5"/>
+            <line x1="15" y1="47.5" x2="28" y2="47.5" stroke="#ff3399" stroke-width="1" opacity="0.5"/>
+            <!-- Right window -->
+            <rect x="48" y="42" width="13" height="11" rx="2.5" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5"/>
+            <line x1="54.5" y1="42" x2="54.5" y2="53" stroke="#ff3399" stroke-width="1" opacity="0.5"/>
+            <line x1="48" y1="47.5" x2="61" y2="47.5" stroke="#ff3399" stroke-width="1" opacity="0.5"/>
+            <!-- Confirmation badge -->
+            <circle cx="61" cy="19" r="13" fill="#ff3399"/>
+            <path d="M54.5 19 L59 23.5 L67.5 13" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="lp-step__num">02</div>
+        <div class="lp-step__body">
+          <h3>Bakery confirms</h3>
+          <p>Your local bakery receives the order and handcrafts your cake fresh to your exact spec.</p>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="lp-step">
+        <div class="lp-step__illo" aria-hidden="true">
+          <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="80" height="80" rx="20" fill="#fff0f7"/>
+            <!-- Box body -->
+            <rect x="13" y="44" width="50" height="26" rx="4" fill="white" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Box lid -->
+            <rect x="11" y="37" width="54" height="9" rx="3" fill="#ffd9ec" stroke="#ff3399" stroke-width="1.5"/>
+            <!-- Ribbon vertical -->
+            <rect x="35" y="37" width="7" height="33" rx="0" fill="#ff3399" opacity="0.2"/>
+            <!-- Ribbon horizontal -->
+            <rect x="13" y="53" width="50" height="7" rx="0" fill="#ff3399" opacity="0.15"/>
+            <!-- Bow left loop -->
+            <path d="M38.5 37 C38.5 37 28 31 29 22 C30 16 36 17 37 24 C37.5 29 38.5 37 38.5 37Z" fill="#ff3399" opacity="0.75"/>
+            <!-- Bow right loop -->
+            <path d="M38.5 37 C38.5 37 49 31 48 22 C47 16 41 17 40 24 C39.5 29 38.5 37 38.5 37Z" fill="#ff3399" opacity="0.75"/>
+            <!-- Bow knot -->
+            <circle cx="38.5" cy="37" r="4" fill="#ff3399"/>
+            <!-- Stars -->
+            <circle cx="22" cy="56.5" r="2" fill="#ffd9ec"/>
+            <circle cx="55" cy="56.5" r="2" fill="#ffd9ec"/>
+            <circle cx="38.5" cy="66" r="2" fill="#ffd9ec"/>
+          </svg>
+        </div>
+        <div class="lp-step__num">03</div>
+        <div class="lp-step__body">
+          <h3>Delivered or collected</h3>
+          <p>Choose home delivery or click-and-collect at a time that works for you.</p>
+        </div>
+      </div>
+
+    </div>
+    <div class="lp-how__cta">
+      <a href="#" class="lp-btn lp-btn--primary">Order your cake →</a>
+    </div>
+  </div>
+</section>
+
+<!-- VALUE PROPS -->
+<section class="lp-props">
+  <div class="lp-props__inner">
+    <div class="lp-prop">
+      <div class="lp-prop__icon">🏪</div>
+      <h3>Local & handcrafted</h3>
+      <p>Every cake is made fresh by a real, certified local bakery — never mass-produced.</p>
+    </div>
+    <div class="lp-prop">
+      <div class="lp-prop__icon">💰</div>
+      <h3>Same price. Always.</h3>
+      <p>No platform markup. You pay exactly what the bakery charges when you walk through the door.</p>
+    </div>
+    <div class="lp-prop">
+      <div class="lp-prop__icon">✏️</div>
+      <h3>Fully customisable</h3>
+      <p>Message, size, flavour, dietary needs — every detail is confirmed directly with the bakery.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CAKE SHOWCASE -->
+<section class="lp-showcase">
+  <div class="lp-showcase__inner">
+    <p class="lp-eyebrow lp-eyebrow--center">Browse by occasion</p>
+    <h2 class="lp-showcase__h2">A cake for every celebration.</h2>
+    <div class="lp-showcase__grid">
+      <a href="#" class="lp-cat lp-cat--large">
+        <img src="https://images.unsplash.com/photo-1621303837174-89787a7d4729?auto=format&fit=crop&w=800&q=80" alt="Birthday cakes" style="object-position: center center;" />
+        <div class="lp-cat__label">Birthday</div>
+      </a>
+      <a href="#" class="lp-cat">
+        <img src="https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?auto=format&fit=crop&w=600&q=80" alt="Wedding cakes" />
+        <div class="lp-cat__label">Wedding</div>
+      </a>
+      <a href="#" class="lp-cat">
+        <img src="https://images.unsplash.com/photo-1486427944299-d1955d23e34d?auto=format&fit=crop&w=600&q=80" alt="Corporate cakes" />
+        <div class="lp-cat__label">Corporate</div>
+      </a>
+      <a href="#" class="lp-cat">
+        <img src="https://images.unsplash.com/photo-1578985545062-69928b1d9587?auto=format&fit=crop&w=600&q=80" alt="Custom cakes" />
+        <div class="lp-cat__label">Custom</div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section class="lp-proof">
+  <div class="lp-proof__inner">
+    <div class="lp-proof__header">
+      <p class="lp-eyebrow">Customer stories</p>
+      <h2>Loved by cake lovers<br>across Norway.</h2>
+    </div>
+    <div class="lp-testimonials">
+      <article class="lp-tcard">
+        <div class="lp-tcard__stars">★★★★★</div>
+        <blockquote>"The birthday cake was stunning — and it tasted even better than it looked. Guests couldn't believe I ordered it online."</blockquote>
+        <footer>
+          <div class="lp-tcard__av">MK</div>
+          <div><strong>Maria K.</strong><small>Oslo</small></div>
+        </footer>
+      </article>
+      <article class="lp-tcard">
+        <div class="lp-tcard__stars">★★★★★</div>
+        <blockquote>"Ordered a corporate cake for 50 people with our company logo. Delivered on time, perfectly executed."</blockquote>
+        <footer>
+          <div class="lp-tcard__av">TH</div>
+          <div><strong>Thomas H.</strong><small>Bergen</small></div>
+        </footer>
+      </article>
+      <article class="lp-tcard">
+        <div class="lp-tcard__stars">★★★★★</div>
+        <blockquote>"Gluten-free and still the most delicious cake I've ever had. Finally a platform that gets dietary needs right."</blockquote>
+        <footer>
+          <div class="lp-tcard__av">SL</div>
+          <div><strong>Sara L.</strong><small>Stockholm</small></div>
+        </footer>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- GUARANTEE -->
+<section class="lp-guarantee">
+  <div class="lp-guarantee__inner">
+    <div class="lp-guarantee__icon">🛡️</div>
+    <div class="lp-guarantee__copy">
+      <h2>Same price as the bakery — guaranteed.</h2>
+      <p>Cake it easy charges no platform fee. You pay exactly what the bakery charges in-store, every single time.</p>
+    </div>
+    <a href="#" class="lp-btn lp-btn--outline">How our pricing works</a>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="lp-faq" id="faq">
+  <div class="lp-faq__inner">
+    <p class="lp-eyebrow">FAQ</p>
+    <h2>Common questions.</h2>
+    <div class="lp-faq__list">
+      <details class="lp-faq__item" open>
+        <summary>How far in advance should I order?</summary>
+        <p>Most bakeries need 24–48 hours. For custom wedding or event cakes, we recommend 1–2 weeks in advance.</p>
+      </details>
+      <details class="lp-faq__item">
+        <summary>Can I add a personalised message or design?</summary>
+        <p>Yes — you can include text, photos, or logos. Each bakery confirms what's possible for your order.</p>
+      </details>
+      <details class="lp-faq__item">
+        <summary>What about dietary requirements?</summary>
+        <p>Use the filter to find bakeries offering gluten-free, dairy-free, vegan, or nut-free options.</p>
+      </details>
+      <details class="lp-faq__item">
+        <summary>What payment methods are accepted?</summary>
+        <p>Visa, Mastercard, Klarna, Vipps, and corporate invoice. All payments are fully secure.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="lp-cta-final">
+  <div class="lp-cta-final__inner">
+    <h2>Ready to order your next cake?</h2>
+    <p>Browse fresh cakes from local bakeries near you — no account required to start.</p>
+    <a href="#" class="lp-btn lp-btn--primary lp-btn--lg">Find cakes near you</a>
+    <p class="lp-cta-final__note">Available in Norway and Sweden · Free to browse</p>
+  </div>
 </section>
