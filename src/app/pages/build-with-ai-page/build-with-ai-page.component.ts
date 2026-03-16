@@ -39,6 +39,28 @@ const SIDEBAR_WIDTH_MIN = 280;
 const SIDEBAR_WIDTH_MAX = 720;
 const MOBILE_SIDEBAR_BREAKPOINT = 1100;
 
+export interface SelectedSection {
+  sectionSelector: string;
+  sectionLabel: string;
+  sectionIndex: number;
+  totalSections: number;
+  sectionOuterHtml: string;
+  elementSelector?: string;
+  elementLabel?: string;
+  elementOuterHtml?: string;
+}
+
+const INSERT_SECTION_TYPES = [
+  'Hero',
+  'Feature Cards',
+  'Testimonials',
+  'Stats Bar',
+  'FAQ',
+  'CTA Banner',
+  'Logo Cloud',
+  'Contact Form'
+] as const;
+
 @Component({
   selector: 'app-build-with-ai-page',
   standalone: true,
@@ -55,6 +77,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private readonly domSanitizer = inject(DomSanitizer);
 
   readonly modelOptions = BUILD_WITH_AI_MODELS;
+  readonly insertSectionTypes = INSERT_SECTION_TYPES;
+
   readonly loading = signal<boolean>(true);
   readonly processing = signal<boolean>(false);
   readonly draftMessage = signal<string>('');
@@ -67,7 +91,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   readonly sidebarResizing = signal<boolean>(false);
   readonly dragActive = signal<boolean>(false);
   readonly activeError = signal<{ category: BuildWithAiErrorCategory; message: string } | null>(null);
+
+  // Section selection
+  readonly selectionModeActive = signal<boolean>(false);
+  readonly selectedSection = signal<SelectedSection | null>(null);
+  readonly hiddenSections = signal<string[]>([]);
+  readonly showInsertMenu = signal<boolean>(false);
+
   @ViewChild('composerTextarea') private composerTextarea?: ElementRef<HTMLTextAreaElement>;
+  @ViewChild('previewIframe') private previewIframe?: ElementRef<HTMLIFrameElement>;
 
   private baselineFiles: BuildWithAiEditableFiles = { html: '', css: '', js: '' };
 
@@ -76,7 +108,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     return selected ?? this.modelOptions[0];
   });
 
-  readonly previewDocument = computed(() => this.buildPreviewDocument(this.files()));
+  readonly previewDocument = computed(() =>
+    this.buildPreviewDocument(this.files(), this.hiddenSections())
+  );
   readonly safePreviewDocument = computed<SafeHtml>(() =>
     this.domSanitizer.bypassSecurityTrustHtml(this.previewDocument())
   );
@@ -102,17 +136,60 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     return Boolean(this.draftMessage().trim() || this.pendingAttachments().length);
   });
 
+  readonly isSectionHidden = computed(() => {
+    const sel = this.selectedSection();
+    return sel ? this.hiddenSections().includes(sel.sectionSelector) : false;
+  });
+
   private readonly previewMessageListener = (event: MessageEvent): void => {
     if (!event.data || typeof event.data !== 'object') {
       return;
     }
 
-    const payload = event.data as { type?: string; message?: string };
-    if (payload.type !== 'build-with-ai-preview-error' || !payload.message) {
+    const payload = event.data as {
+      type?: string;
+      message?: string;
+      sectionSelector?: string;
+      sectionLabel?: string;
+      sectionIndex?: number;
+      totalSections?: number;
+      sectionOuterHtml?: string;
+      elementSelector?: string;
+      elementLabel?: string;
+      elementOuterHtml?: string;
+      action?: string;
+    };
+
+    if (payload.type === 'build-with-ai-preview-error') {
+      if (payload.message) {
+        this.setError('preview', payload.message);
+      }
       return;
     }
 
-    this.setError('preview', payload.message);
+    if (payload.type === 'bwai-selected') {
+      this.selectedSection.set({
+        sectionSelector: payload.sectionSelector ?? '',
+        sectionLabel: payload.sectionLabel ?? '',
+        sectionIndex: payload.sectionIndex ?? 0,
+        totalSections: payload.totalSections ?? 1,
+        sectionOuterHtml: payload.sectionOuterHtml ?? '',
+        elementSelector: payload.elementSelector,
+        elementLabel: payload.elementLabel,
+        elementOuterHtml: payload.elementOuterHtml
+      });
+      return;
+    }
+
+    if (payload.type === 'bwai-action') {
+      switch (payload.action) {
+        case 'move-up':   this.onMoveSectionUp();   break;
+        case 'move-down': this.onMoveSectionDown();  break;
+        case 'hide':      this.onToggleHideSection(); break;
+        case 'insert':    this.showInsertMenu.set(true); break;
+      }
+      return;
+    }
   };
 
   async ngOnInit(): Promise<void> {
@@ -220,6 +297,17 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.updateSidebarWidth(event.clientX);
   }
 
+  @HostListener('window:keydown', ['$event'])
+  onWindowKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      if (this.showInsertMenu()) {
+        this.showInsertMenu.set(false);
+      } else if (this.selectedSection()) {
+        this.onDeselectSection();
+      }
+    }
+  }
+
   onTextareaInput(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLTextAreaElement)) {
@@ -228,6 +316,108 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     this.resizeTextarea(target);
   }
+
+  // ── Section selection ──────────────────────────
+
+  onIframeLoad(): void {
+    const win = this.previewIframe?.nativeElement.contentWindow;
+    if (!win) return;
+
+    if (this.selectionModeActive()) {
+      win.postMessage({ type: 'bwai-mode', enabled: true }, '*');
+    }
+
+    const sel = this.selectedSection();
+    if (sel) {
+      win.postMessage({ type: 'bwai-highlight', sectionSelector: sel.sectionSelector, elementSelector: sel.elementSelector }, '*');
+    }
+  }
+
+  onToggleSelectionMode(): void {
+    const next = !this.selectionModeActive();
+    this.selectionModeActive.set(next);
+
+    const win = this.previewIframe?.nativeElement.contentWindow;
+    if (win) {
+      win.postMessage({ type: 'bwai-mode', enabled: next }, '*');
+    }
+
+    if (!next) {
+      this.selectedSection.set(null);
+      this.showInsertMenu.set(false);
+      win?.postMessage({ type: 'bwai-highlight', sectionSelector: null, elementSelector: null }, '*');
+    }
+  }
+
+  onDeselectSection(): void {
+    this.selectedSection.set(null);
+    this.showInsertMenu.set(false);
+    this.previewIframe?.nativeElement.contentWindow?.postMessage(
+      { type: 'bwai-highlight', sectionSelector: null, elementSelector: null },
+      '*'
+    );
+  }
+
+  // ── Section reordering ─────────────────────────
+
+  onMoveSectionUp(): void {
+    const sel = this.selectedSection();
+    if (!sel || sel.sectionIndex <= 0) return;
+
+    this.swapHtmlSections(sel.sectionIndex, sel.sectionIndex - 1);
+    this.selectedSection.update((s) => (s ? { ...s, sectionIndex: s.sectionIndex - 1 } : null));
+    this.persistSession();
+  }
+
+  onMoveSectionDown(): void {
+    const sel = this.selectedSection();
+    if (!sel || sel.sectionIndex >= sel.totalSections - 1) return;
+
+    this.swapHtmlSections(sel.sectionIndex, sel.sectionIndex + 1);
+    this.selectedSection.update((s) => (s ? { ...s, sectionIndex: s.sectionIndex + 1 } : null));
+    this.persistSession();
+  }
+
+  // ── Section visibility ─────────────────────────
+
+  onToggleHideSection(): void {
+    const sel = this.selectedSection();
+    if (!sel) return;
+
+    const isHidden = this.hiddenSections().includes(sel.sectionSelector);
+    this.hiddenSections.update((hs) =>
+      isHidden ? hs.filter((s) => s !== sel.sectionSelector) : [...hs, sel.sectionSelector]
+    );
+  }
+
+  // ── Insert section ─────────────────────────────
+
+  onToggleInsertMenu(): void {
+    this.showInsertMenu.update((v) => !v);
+  }
+
+  onInsertSection(type: string): void {
+    this.showInsertMenu.set(false);
+
+    const sel = this.selectedSection();
+    const afterText = sel
+      ? ` after the ${sel.sectionSelector} section (index ${sel.sectionIndex})`
+      : ' at the end of the page';
+
+    this.draftMessage.set(
+      `Insert a "${type}" section${afterText}. Match the existing lp- CSS class naming convention, rose #FF3399 accent, and design tokens.`
+    );
+
+    setTimeout(() => {
+      const ta = this.composerTextarea?.nativeElement;
+      if (ta) {
+        ta.focus();
+        this.resizeTextarea(ta);
+      }
+    }, 0);
+  }
+
+  // ── Send ───────────────────────────────────────
 
   async onSend(): Promise<void> {
     if (!this.canSend()) {
@@ -246,6 +436,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.draftMessage.set('');
     this.pendingAttachments.set([]);
     this.activeError.set(null);
+    this.showInsertMenu.set(false);
     this.resetTextareaHeight();
     this.persistSession();
 
@@ -255,6 +446,13 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   async onStartNewSession(): Promise<void> {
     this.activeError.set(null);
     this.pendingAttachments.set([]);
+    this.selectedSection.set(null);
+    this.hiddenSections.set([]);
+    this.showInsertMenu.set(false);
+
+    if (this.selectionModeActive()) {
+      this.selectionModeActive.set(false);
+    }
 
     this.files.set(this.baselineFiles);
     this.messages.set([
@@ -324,7 +522,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       const response = await this.apiService.requestPatch(
         {
           modelKey: this.selectedModel().key,
-          messages: this.messages(),
+          messages: this.buildMessagesWithSectionContext(),
           files: this.files()
         }
       );
@@ -395,6 +593,56 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  private buildMessagesWithSectionContext(): BuildWithAiChatMessage[] {
+    const messages = this.messages();
+    const sel = this.selectedSection();
+
+    if (!sel || messages.length === 0) return messages;
+
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.role !== 'user') return messages;
+
+    let contextPrefix =
+      `[Section context: ${sel.sectionSelector}, index ${sel.sectionIndex} of ${sel.totalSections - 1}]\n` +
+      `Section HTML:\n${sel.sectionOuterHtml}\n\n`;
+
+    if (sel.elementSelector && sel.elementOuterHtml) {
+      contextPrefix +=
+        `[Element context: ${sel.elementSelector}]\n` +
+        `Element HTML:\n${sel.elementOuterHtml}\n\n` +
+        `Focus your changes on this element (${sel.elementSelector}) inside the ${sel.sectionSelector} section unless the user explicitly asks otherwise.\n\n` +
+        `User request: `;
+    } else {
+      contextPrefix +=
+        `Focus your changes on this section unless the user explicitly asks otherwise.\n\n` +
+        `User request: `;
+    }
+
+    return [
+      ...messages.slice(0, -1),
+      { ...lastMsg, text: `${contextPrefix}${lastMsg.text}` }
+    ];
+  }
+
+  private swapHtmlSections(indexA: number, indexB: number): void {
+    const container = document.createElement('div');
+    container.innerHTML = this.files().html;
+    const children = Array.from(container.children);
+
+    if (indexA >= children.length || indexB >= children.length) return;
+
+    const a = children[indexA];
+    const b = children[indexB];
+
+    if (indexA < indexB) {
+      container.insertBefore(b, a);
+    } else {
+      container.insertBefore(a, b);
+    }
+
+    this.files.update((f) => ({ ...f, html: container.innerHTML }));
+  }
+
   private async appendAttachments(fileList: FileList): Promise<void> {
     const files = Array.from(fileList).filter((file) => file.type.startsWith('image/'));
     if (!files.length) {
@@ -441,9 +689,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  private buildPreviewDocument(files: BuildWithAiEditableFiles): string {
+  private buildPreviewDocument(files: BuildWithAiEditableFiles, hiddenSections: string[] = []): string {
     const safeCss = files.css.replace(/<\/style>/gi, '<\\/style>');
     const safeJs = files.js.replace(/<\/script>/gi, '<\\/script>');
+    const hiddenCss = hiddenSections.length
+      ? hiddenSections.map((sel) => `${sel}{display:none!important}`).join('')
+      : '';
 
     return `<!doctype html>
 <html lang="en">
@@ -453,7 +704,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     <title>Build with AI preview</title>
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap" rel="stylesheet" />
     <style>${BUILD_WITH_AI_STATIC_SHELL_CSS}</style>
-    <style id="BuildWithAiContentStyle">${safeCss}</style>
+    <style id="BuildWithAiContentStyle">${safeCss}</style>${hiddenCss ? `\n    <style id="BuildWithAiHiddenSections">${hiddenCss}</style>` : ''}
   </head>
   <body>
     ${BUILD_WITH_AI_HEADER_HTML}
@@ -513,6 +764,288 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         });
       })();
     </script>
+
+    <script>
+      /* ---- section selection mode ---- */
+      (function () {
+        var selActive = false;
+        var hoveredSection = null;
+        var toolbar = null;
+        var toolbarSection = null;
+        var toolbarOrigPos = '';
+
+        /* ── helpers ── */
+        function getSection(target) {
+          var root = document.getElementById('EditableContentRoot');
+          if (!root || !(target instanceof Element)) return null;
+          var node = target;
+          while (node && node.parentElement !== root) {
+            if (node === root) return null;
+            node = node.parentElement;
+          }
+          return (node && node.parentElement === root) ? node : null;
+        }
+
+        function clearClass(cls) {
+          var els = document.querySelectorAll('.' + cls);
+          for (var i = 0; i < els.length; i++) els[i].classList.remove(cls);
+        }
+
+        function getSectionMeta(el) {
+          var root = document.getElementById('EditableContentRoot');
+          var siblings = root ? Array.from(root.children) : [el];
+          var idx = siblings.indexOf(el);
+          var rawCls = (el.className || '').replace(/bwai-\\S*/g, '').trim().split(/\\s+/);
+          var firstClass = rawCls.find(function (c) { return c.length > 0; }) || '';
+          var selector = firstClass ? ('.' + firstClass) : ('section:nth-child(' + (idx + 1) + ')');
+          var labelRaw = firstClass.replace(/^lp-/, '').replace(/-/g, ' ');
+          var label = labelRaw ? (labelRaw.charAt(0).toUpperCase() + labelRaw.slice(1)) : ('Section ' + (idx + 1));
+          return { idx: idx, total: siblings.length, selector: selector, label: label };
+        }
+
+        function getElementMeta(el) {
+          var tag = el.tagName.toLowerCase();
+          var rawCls = (el.className || '').replace(/bwai-\\S*/g, '').trim().split(/\\s+/);
+          var firstClass = rawCls.find(function (c) { return c.length > 0; }) || '';
+          var selector = tag + (firstClass ? ('.' + firstClass) : '');
+          return { selector: selector, label: selector };
+        }
+
+        function getCleanOuterHtml(el) {
+          var clone = el.cloneNode(true);
+          var bwaiEls = clone.querySelectorAll('.bwai-toolbar, .bwai-handle');
+          for (var i = bwaiEls.length - 1; i >= 0; i--) {
+            if (bwaiEls[i].parentNode) bwaiEls[i].parentNode.removeChild(bwaiEls[i]);
+          }
+          clone.className = (clone.className || '').replace(/bwai-\\S*/g, '').trim();
+          var allEls = clone.querySelectorAll('[class]');
+          for (var j = 0; j < allEls.length; j++) {
+            allEls[j].className = allEls[j].className.replace(/bwai-\\S*/g, '').trim();
+          }
+          return clone.outerHTML;
+        }
+
+        /* ── section handle badges ── */
+        function injectHandles() {
+          var root = document.getElementById('EditableContentRoot');
+          if (!root) return;
+          Array.from(root.children).forEach(function (el) {
+            if (el.querySelector('.bwai-handle')) return;
+            var computed = window.getComputedStyle(el).position;
+            if (computed === 'static') el.style.position = 'relative';
+            var m = getSectionMeta(el);
+            var handle = document.createElement('button');
+            handle.className = 'bwai-handle';
+            handle.setAttribute('data-bwai-handle', '');
+            handle.textContent = '\\u2261 ' + m.label;
+            el.insertBefore(handle, el.firstChild);
+          });
+        }
+
+        function showHandles(show) {
+          var handles = document.querySelectorAll('.bwai-handle');
+          for (var i = 0; i < handles.length; i++) {
+            handles[i].style.display = show ? '' : 'none';
+          }
+        }
+
+        /* ── toolbar ── */
+        function removeToolbar() {
+          if (toolbar && toolbar.parentElement) {
+            toolbar.parentElement.removeChild(toolbar);
+          }
+          if (toolbarSection) {
+            toolbarSection.style.position = toolbarOrigPos;
+          }
+          toolbar = null;
+          toolbarSection = null;
+          toolbarOrigPos = '';
+        }
+
+        function buildToolbar(el, idx, total) {
+          if (toolbarSection === el) {
+            if (toolbar) {
+              var u = toolbar.querySelector('[data-bwai="move-up"]');
+              var d = toolbar.querySelector('[data-bwai="move-down"]');
+              if (u) u.disabled = (idx === 0);
+              if (d) d.disabled = (idx === total - 1);
+            }
+            return;
+          }
+          removeToolbar();
+          toolbarOrigPos = el.style.position || '';
+          var computed = window.getComputedStyle(el).position;
+          if (computed === 'static') el.style.position = 'relative';
+          toolbarSection = el;
+
+          var t = document.createElement('div');
+          t.className = 'bwai-toolbar';
+
+          function btn(action, label, disabled) {
+            var b = document.createElement('button');
+            b.setAttribute('data-bwai', action);
+            b.textContent = label;
+            if (disabled) b.disabled = true;
+            return b;
+          }
+
+          t.appendChild(btn('move-up',   '\\u2191 Up',     idx === 0));
+          t.appendChild(btn('move-down', '\\u2193 Down',   idx === total - 1));
+          t.appendChild(btn('hide',      'Hide',           false));
+          t.appendChild(btn('insert',    '+ Insert',       false));
+
+          t.addEventListener('click', function (e) {
+            var b = e.target.closest ? e.target.closest('[data-bwai]') : null;
+            if (!b || b.disabled) return;
+            e.stopPropagation();
+            e.preventDefault();
+            parent.postMessage({ type: 'bwai-action', action: b.getAttribute('data-bwai') }, '*');
+          });
+
+          el.appendChild(t);
+          toolbar = t;
+        }
+
+        /* ── message handler ── */
+        window.addEventListener('message', function (event) {
+          var d = event.data;
+          if (!d || typeof d !== 'object') return;
+
+          if (d.type === 'bwai-mode') {
+            selActive = !!d.enabled;
+            document.body.style.cursor = selActive ? 'crosshair' : '';
+            if (selActive) {
+              injectHandles();
+              showHandles(true);
+            } else {
+              clearClass('bwai-hover');
+              clearClass('bwai-selected');
+              clearClass('bwai-elem-hover');
+              clearClass('bwai-elem-selected');
+              removeToolbar();
+              showHandles(false);
+            }
+          }
+
+          if (d.type === 'bwai-highlight') {
+            clearClass('bwai-selected');
+            clearClass('bwai-elem-selected');
+            removeToolbar();
+            if (d.sectionSelector) {
+              var sEl = document.querySelector(d.sectionSelector);
+              if (sEl) {
+                sEl.classList.add('bwai-selected');
+                var m = getSectionMeta(sEl);
+                buildToolbar(sEl, m.idx, m.total);
+              }
+            }
+            if (d.elementSelector) {
+              var scope = d.sectionSelector ? document.querySelector(d.sectionSelector) : document;
+              var eEl = scope ? scope.querySelector(d.elementSelector) : null;
+              if (eEl) eEl.classList.add('bwai-elem-selected');
+            }
+          }
+
+          if (d.type === 'bwai-update-toolbar') {
+            if (toolbar && toolbarSection) {
+              var m2 = getSectionMeta(toolbarSection);
+              var ups = toolbar.querySelector('[data-bwai="move-up"]');
+              var dns = toolbar.querySelector('[data-bwai="move-down"]');
+              if (ups) ups.disabled = (m2.idx === 0);
+              if (dns) dns.disabled = (m2.idx === m2.total - 1);
+            }
+          }
+        });
+
+        /* ── hover ── */
+        document.addEventListener('mousemove', function (event) {
+          if (!selActive) return;
+          var target = event.target;
+          if (!(target instanceof Element)) return;
+          if (target.hasAttribute('data-bwai-handle') || target.closest('.bwai-toolbar')) return;
+
+          var sec = getSection(target);
+
+          if (sec !== hoveredSection) {
+            clearClass('bwai-hover');
+            clearClass('bwai-elem-hover');
+            hoveredSection = sec;
+            if (sec) {
+              if (!sec.classList.contains('bwai-selected')) sec.classList.add('bwai-hover');
+              var m = getSectionMeta(sec);
+              buildToolbar(sec, m.idx, m.total);
+            } else {
+              removeToolbar();
+            }
+          }
+
+          clearClass('bwai-elem-hover');
+          if (sec && target !== sec) target.classList.add('bwai-elem-hover');
+        });
+
+        /* ── click to select ── */
+        document.addEventListener('click', function (event) {
+          if (!selActive) return;
+          if (toolbar && toolbar.contains(event.target)) return;
+          var target = event.target;
+          if (!(target instanceof Element)) return;
+
+          var sec = getSection(target);
+          if (!sec) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+
+          clearClass('bwai-hover');
+          clearClass('bwai-selected');
+          clearClass('bwai-elem-hover');
+          clearClass('bwai-elem-selected');
+          sec.classList.add('bwai-selected');
+          hoveredSection = null;
+
+          var m = getSectionMeta(sec);
+          buildToolbar(sec, m.idx, m.total);
+
+          var isHandle = target.hasAttribute('data-bwai-handle') ||
+            !!(target.closest && target.closest('[data-bwai-handle]'));
+
+          var msg = {
+            type: 'bwai-selected',
+            sectionSelector: m.selector,
+            sectionLabel: m.label,
+            sectionIndex: m.idx,
+            totalSections: m.total,
+            sectionOuterHtml: getCleanOuterHtml(sec)
+          };
+
+          if (!isHandle && target !== sec) {
+            target.classList.add('bwai-elem-selected');
+            var em = getElementMeta(target);
+            msg.elementSelector = em.selector;
+            msg.elementLabel = em.label;
+            msg.elementOuterHtml = target.outerHTML;
+          }
+
+          parent.postMessage(msg, '*');
+        }, true);
+
+        /* ── CSS ── */
+        var style = document.createElement('style');
+        style.textContent = [
+          '.bwai-hover{outline:2px dashed #ff3399!important;outline-offset:-2px;cursor:crosshair!important}',
+          '.bwai-selected{outline:2px solid #ff3399!important;outline-offset:-2px;background-color:rgba(255,51,153,0.04)!important}',
+          '.bwai-elem-hover{outline:2px dashed #3b82f6!important;outline-offset:-1px;cursor:pointer!important}',
+          '.bwai-elem-selected{outline:2px solid #3b82f6!important;outline-offset:-1px;background-color:rgba(59,130,246,0.06)!important}',
+          '.bwai-handle{position:absolute;top:8px;left:8px;z-index:99999;display:none;background:#fff;border:1px solid rgba(0,0,0,0.12);border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;color:#555;font-family:-apple-system,sans-serif;white-space:nowrap;box-shadow:0 1px 6px rgba(0,0,0,0.1);pointer-events:all;line-height:1.4}',
+          '.bwai-handle:hover{background:#fff0f7;border-color:#ff3399;color:#ff3399}',
+          '.bwai-toolbar{position:absolute;top:8px;right:8px;z-index:99999;display:flex;gap:4px;background:#fff;border:1px solid rgba(0,0,0,0.1);border-radius:8px;padding:4px 6px;box-shadow:0 2px 12px rgba(0,0,0,0.14);pointer-events:all}',
+          '.bwai-toolbar button{border:1px solid #e5e5e5;background:#fff;padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;color:#555;font-family:-apple-system,sans-serif;white-space:nowrap;transition:background .1s,color .1s,border-color .1s}',
+          '.bwai-toolbar button:hover:not(:disabled){background:#fff0f7;border-color:#ff3399;color:#ff3399}',
+          '.bwai-toolbar button:disabled{opacity:.3;cursor:not-allowed}'
+        ].join('');
+        document.head.appendChild(style);
+      })();
+    </script>
+
     <script id="BuildWithAiContentScript">${safeJs}</script>
   </body>
 </html>`;

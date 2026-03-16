@@ -9,18 +9,67 @@
   ></div>
 
   <div class="build-with-ai-page__workspace">
-    <section class="preview-pane" [class.preview-pane--busy]="processing()">
+    <section class="preview-pane" [class.preview-pane--busy]="processing()" [class.preview-pane--selecting]="selectionModeActive()">
+
+      <div class="preview-toolbar">
+        <div class="preview-toolbar__chrome">
+          <span class="chrome-dot chrome-dot--red"></span>
+          <span class="chrome-dot chrome-dot--yellow"></span>
+          <span class="chrome-dot chrome-dot--green"></span>
+        </div>
+        <div class="preview-toolbar__url">
+          <svg width="11" height="11" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="1" y="4" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M4.5 4V3a2.5 2.5 0 0 1 5 0v1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          cakeiteasy.no / landing
+        </div>
+        <div class="preview-toolbar__actions">
+          <button type="button" class="preview-toolbar__icon-btn" title="Desktop view" aria-label="Desktop view">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <rect x="1" y="1.5" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4"/>
+              <path d="M5.5 14.5h5M8 11.5v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button type="button" class="preview-toolbar__icon-btn" title="Mobile view" aria-label="Mobile view">
+            <svg width="10" height="14" viewBox="0 0 12 18" fill="none">
+              <rect x="1" y="1" width="10" height="16" rx="2" stroke="currentColor" stroke-width="1.4"/>
+              <circle cx="6" cy="14.5" r="0.8" fill="currentColor"/>
+            </svg>
+          </button>
+
+          <div class="preview-toolbar__sep" aria-hidden="true"></div>
+
+          <button
+            type="button"
+            class="preview-toolbar__select-btn"
+            [class.preview-toolbar__select-btn--active]="selectionModeActive()"
+            title="Select a section to edit"
+            aria-label="Toggle section selection mode"
+            (click)="onToggleSelectionMode()"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M1 1h5v2H3v3H1V1zM10 1h5v5h-2V3h-3V1zM1 10h2v3h3v2H1v-5zM13 10h2v5h-5v-2h3v-3z" fill="currentColor" opacity=".5"/>
+              <rect x="5.5" y="5.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            Select
+          </button>
+        </div>
+      </div>
+
       <div class="preview-frame-wrap">
         <iframe
+          #previewIframe
           title="Build with AI preview"
           class="preview-frame"
           [attr.srcdoc]="safePreviewDocument()"
           sandbox="allow-scripts"
+          (load)="onIframeLoad()"
         ></iframe>
 
         <div class="preview-overlay" *ngIf="processing()">
           <div class="spinner"></div>
-          <p>Applying AI changes...</p>
+          <p>Applying AI changes…</p>
         </div>
       </div>
     </section>
@@ -36,12 +85,12 @@
 
       <header class="chat-pane__header">
         <div class="chat-pane__title">
-          <p class="chat-pane__eyebrow">AI Controls</p>
+          <span class="chat-pane__badge">AI</span>
           <h2>Patch Generator</h2>
         </div>
 
         <button type="button" class="ghost-button ghost-button--small" (click)="onStartNewSession()">
-          Start new session
+          New session
         </button>
       </header>
 
@@ -62,7 +111,6 @@
           [class.message--assistant]="message.role === 'assistant'"
           [class.message--error]="message.errorCategory"
         >
-          <p class="message__meta">{{ message.role === 'user' ? 'You' : 'AI' }}</p>
           <p class="message__text">{{ message.text }}</p>
 
           <ul class="message__attachments" *ngIf="message.attachments.length">
@@ -75,7 +123,50 @@
       </section>
 
       <form class="composer" (submit)="$event.preventDefault(); onSend()">
-        <p class="composer__hint">Drop images here or use upload. Images are sent as vision context.</p>
+
+        <!-- Section context chip -->
+        <div class="section-ctx" *ngIf="selectedSection() as sel">
+          <div class="section-ctx__row">
+            <div class="section-ctx__chip">
+              <span class="section-ctx__dot" aria-hidden="true"></span>
+              <span class="section-ctx__label">
+                {{ sel.sectionLabel }}<ng-container *ngIf="sel.elementLabel"> › {{ sel.elementLabel }}</ng-container>
+              </span>
+              <button
+                type="button"
+                class="section-ctx__deselect"
+                title="Deselect section"
+                aria-label="Deselect section"
+                (click)="onDeselectSection()"
+              >✕</button>
+            </div>
+
+            <div class="section-insert-wrap">
+              <button
+                type="button"
+                class="section-ctx__insert-btn"
+                [class.section-ctx__insert-btn--active]="showInsertMenu()"
+                title="Insert a new section"
+                (click)="onToggleInsertMenu()"
+              >+ Insert</button>
+
+              <div class="insert-menu" *ngIf="showInsertMenu()">
+                <button
+                  type="button"
+                  class="insert-menu__item"
+                  *ngFor="let type of insertSectionTypes"
+                  (click)="onInsertSection(type)"
+                >{{ type }}</button>
+                <div class="insert-menu__sep" aria-hidden="true"></div>
+                <button
+                  type="button"
+                  class="insert-menu__item insert-menu__item--custom"
+                  (click)="onInsertSection('custom')"
+                >Custom…</button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div class="composer__pending" *ngIf="pendingAttachments().length">
           <button
@@ -85,29 +176,40 @@
             (click)="removePendingAttachment(attachment.id)"
           >
             <span>{{ attachment.name }}</span>
-            <small>remove</small>
+            <small>✕</small>
           </button>
         </div>
 
-        <textarea
-          #composerTextarea
-          rows="2"
-          [ngModel]="draftMessage()"
-          (ngModelChange)="onDraftChanged($event)"
-          (input)="onTextareaInput($event)"
-          (keydown)="onComposerKeydown($event)"
-          name="prompt"
-          placeholder="Describe the change you want in the content section..."
-        ></textarea>
+        <div class="composer__field">
+          <textarea
+            #composerTextarea
+            rows="2"
+            [ngModel]="draftMessage()"
+            (ngModelChange)="onDraftChanged($event)"
+            (input)="onTextareaInput($event)"
+            (keydown)="onComposerKeydown($event)"
+            name="prompt"
+            placeholder="Describe the change you want…"
+          ></textarea>
+        </div>
 
         <div class="composer__actions">
           <div class="composer__actions-left">
-            <label class="upload-button">
-              Add image
+            <label class="upload-button" title="Attach image">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2 12l3.5-4.5 2.5 3L11 7l3 5H2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                <circle cx="5.5" cy="5.5" r="1.2" stroke="currentColor" stroke-width="1.3"/>
+                <rect x="0.7" y="0.7" width="14.6" height="14.6" rx="2.3" stroke="currentColor" stroke-width="1.3"/>
+              </svg>
+              <span>Image</span>
               <input type="file" accept="image/*" multiple (change)="onFileInputChange($event)" />
             </label>
 
-            <label class="model-select">
+            <label class="model-select" [title]="selectedModel().label">
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M7 4v3l2 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
               <select
                 aria-label="Model selection"
                 name="model"
@@ -119,12 +221,24 @@
             </label>
           </div>
 
-          <button type="submit" [disabled]="!canSend()">Apply changes</button>
+          <button type="submit" class="send-button" [disabled]="!canSend()">
+            Apply
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
         </div>
+
+        <p class="composer__hint">Drop images or use the image button. They're sent as vision context.</p>
       </form>
 
       <details class="patch-log" *ngIf="patchLogs().length">
-        <summary>Patch log ({{ patchLogs().length }})</summary>
+        <summary>
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M2 4h10M2 7h7M2 10h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          Patch log ({{ patchLogs().length }})
+        </summary>
 
         <ul>
           <li *ngFor="let log of patchLogs(); trackBy: trackByPatchLog">
@@ -143,7 +257,7 @@
   <div class="build-with-ai-page build-with-ai-page--loading">
     <div class="loading-card">
       <div class="spinner"></div>
-      <p>Loading build-with-ai workspace...</p>
+      <p>Loading workspace…</p>
     </div>
   </div>
 </ng-template>
