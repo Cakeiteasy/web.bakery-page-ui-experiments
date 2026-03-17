@@ -1,6 +1,6 @@
 import { MongoClient } from 'mongodb';
 
-const dbName = process.env['MONGODB_DB_NAME'] ?? 'cakeiteasy';
+const dbName = process.env['MONGODB_DB_NAME'] ?? 'cakeiteasy-ai-dev';
 
 declare global {
   // eslint-disable-next-line no-var

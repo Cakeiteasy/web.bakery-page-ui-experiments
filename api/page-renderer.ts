@@ -3,9 +3,12 @@ import clientPromise, { dbName } from '../lib/mongodb';
 import { buildPublishedDocument } from '../lib/build-preview';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Extract slug from the request URL path (strip leading slash)
+  // Accept slug from query param (?slug=xxx) as well as from the URL path.
+  // The query-param form is used by the Angular dev router which calls
+  // /api/page-renderer?slug=<slug> so the proxy can forward it to vercel dev.
   const rawPath = req.url ?? '/';
-  const slug = rawPath.replace(/^\//, '').split('?')[0];
+  const querySlug = (req.query as Record<string, string>)['slug'] ?? '';
+  const slug = querySlug || rawPath.replace(/^\//, '').split('?')[0];
 
   if (!slug) {
     res.writeHead(302, { Location: '/' });

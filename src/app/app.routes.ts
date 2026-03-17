@@ -4,6 +4,7 @@ import { ProductDetailsPageComponent } from './pages/product-details-page/produc
 import { ProductsOverviewPageComponent } from './pages/products-overview-page/products-overview-page.component';
 import { BuildWithAiPageComponent } from './pages/build-with-ai-page/build-with-ai-page.component';
 import { PagesListComponent } from './pages/pages-list/pages-list.component';
+import { DynamicPageViewComponent } from './pages/dynamic-page-view/dynamic-page-view.component';
 
 export const appRoutes: Routes = [
   {
@@ -24,6 +25,6 @@ export const appRoutes: Routes = [
   },
   {
     path: '**',
-    redirectTo: ''
+    component: DynamicPageViewComponent
   }
 ];

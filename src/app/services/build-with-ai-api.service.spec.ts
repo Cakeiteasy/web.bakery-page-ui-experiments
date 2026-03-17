@@ -1,84 +1,101 @@
 import { provideHttpClient } from '@angular/common/http';
-import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 
 import { BuildWithAiApiService } from './build-with-ai-api.service';
 
+function mockFetch(text: string, status = 200): void {
+  spyOn(window, 'fetch').and.returnValue(
+    Promise.resolve(
+      new Response(text, {
+        status,
+        headers: { 'Content-Type': 'text/plain' }
+      })
+    )
+  );
+}
+
 describe('BuildWithAiApiService', () => {
   let service: BuildWithAiApiService;
-  let httpController: HttpTestingController;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting()]
+      providers: [provideHttpClient()]
     });
-
     service = TestBed.inject(BuildWithAiApiService);
-    httpController = TestBed.inject(HttpTestingController);
   });
 
-  afterEach(() => {
-    httpController.verify();
-  });
+  it('sends x-demo-key header and parses edits response', async () => {
+    const payload = JSON.stringify({
+      assistantText: 'Done',
+      edits: [{ file: 'content.html', search: '<section></section>', replace: '<section>Updated</section>' }],
+      warnings: ['sample']
+    });
+    mockFetch(payload);
 
-  it('sends x-demo-key header and parses structured response', async () => {
-    const promise = service.requestPatch(
+    const response = await service.requestPatch(
       {
         modelKey: 'openai:gpt-5.1',
         messages: [],
-        files: {
-          html: '<section></section>',
-          css: '.x{}',
-          js: 'console.log(1);'
-        }
+        files: { html: '<section></section>', css: '.x{}', js: 'console.log(1);' }
       },
       'secret-key'
     );
 
-    const req = httpController.expectOne('/api/build-with-ai');
-    expect(req.request.method).toBe('POST');
-    expect(req.request.headers.get('x-demo-key')).toBe('secret-key');
+    const fetchCall = (window.fetch as jasmine.Spy).calls.mostRecent();
+    expect(fetchCall.args[1].headers['x-demo-key']).toBe('secret-key');
 
-    req.flush({
-      assistantText: 'Done',
-      diff: '--- content.html\n+++ content.html\n@@ -1 +1 @@\n-<section></section>\n+<section>Updated</section>',
-      warnings: ['sample'],
-      usage: {
-        totalTokens: 10
-      }
-    });
-
-    const response = await promise;
     expect(response.assistantText).toBe('Done');
-    expect(response.diff).toContain('content.html');
+    expect(response.edits.length).toBe(1);
+    expect(response.edits[0].file).toBe('content.html');
     expect(response.warnings).toEqual(['sample']);
   });
 
   it('does not send x-demo-key header when demo key is omitted', async () => {
-    const promise = service.requestPatch(
-      {
-        modelKey: 'openai:gpt-5.1',
-        messages: [],
-        files: {
-          html: '<section></section>',
-          css: '.x{}',
-          js: 'console.log(1);'
-        }
-      }
-    );
-
-    const req = httpController.expectOne('/api/build-with-ai');
-    expect(req.request.method).toBe('POST');
-    expect(req.request.headers.has('x-demo-key')).toBeFalse();
-
-    req.flush({
+    const payload = JSON.stringify({
       assistantText: 'Done',
-      diff: '--- content.html\n+++ content.html\n@@ -1 +1 @@\n-<section></section>\n+<section>Updated</section>',
+      edits: [],
       warnings: []
     });
+    mockFetch(payload);
 
-    const response = await promise;
-    expect(response.assistantText).toBe('Done');
-    expect(response.warnings).toEqual([]);
+    await service.requestPatch({
+      modelKey: 'openai:gpt-5.1',
+      messages: [],
+      files: { html: '<section></section>', css: '.x{}', js: 'console.log(1);' }
+    });
+
+    const fetchCall = (window.fetch as jasmine.Spy).calls.mostRecent();
+    expect(fetchCall.args[1].headers['x-demo-key']).toBeUndefined();
+  });
+
+  it('throws when API returns non-ok status', async () => {
+    spyOn(window, 'fetch').and.returnValue(
+      Promise.resolve(
+        new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      )
+    );
+
+    await expectAsync(
+      service.requestPatch({
+        modelKey: 'openai:gpt-5.1',
+        messages: [],
+        files: { html: '', css: '', js: '' }
+      })
+    ).toBeRejectedWithError(/Unauthorized/);
+  });
+
+  it('throws when response has no edits array', async () => {
+    mockFetch(JSON.stringify({ assistantText: 'Oops' }));
+
+    await expectAsync(
+      service.requestPatch({
+        modelKey: 'openai:gpt-5.1',
+        messages: [],
+        files: { html: '', css: '', js: '' }
+      })
+    ).toBeRejectedWithError(/edits/);
   });
 });

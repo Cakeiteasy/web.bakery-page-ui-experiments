@@ -139,6 +139,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private baselineFiles: BuildWithAiEditableFiles = { html: '', css: '', js: '' };
   private routeParamSub?: ReturnType<typeof this.route.paramMap.subscribe>;
   private copiedToastTimeout?: ReturnType<typeof setTimeout>;
+  private skipNextIframePatch = false;
 
   readonly selectedModel = computed(() => {
     const selected = this.modelOptions.find((option) => option.key === this.selectedModelKey());
@@ -183,6 +184,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     effect(() => {
       const f = this.files();
       if (!this.iframeReady) return;
+      if (this.skipNextIframePatch) { this.skipNextIframePatch = false; return; }
       this.sendToIframe({ type: 'bwai-patch', html: f.html, css: f.css, js: f.js });
     });
 
@@ -239,12 +241,25 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       return;
     }
 
+    if (payload.type === 'bwai-inline-edit-save') {
+      const newHtml = String((payload as any).html ?? '');
+      const updated = { ...this.files(), html: newHtml };
+      const validation = this.syntaxValidator.validate(updated);
+      if (validation.valid) {
+        this.skipNextIframePatch = true;
+        this.files.set(updated);
+        void this.persistToMongo({ currentFiles: updated });
+      }
+      return;
+    }
+
     if (payload.type === 'bwai-action') {
       switch (payload.action) {
         case 'move-up':   this.onMoveSectionUp();   break;
         case 'move-down': this.onMoveSectionDown();  break;
         case 'hide':      this.onToggleHideSection(); break;
         case 'insert':    this.showInsertMenu.set(true); break;
+        case 'select':    this.selectionModeActive.set(true); break;
       }
       return;
     }
@@ -1276,6 +1291,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           t.appendChild(btn('move-down', '↓ Down',    idx === total - 1));
           t.appendChild(btn('hide',      'Hide',      false));
           t.appendChild(btn('insert',    '+ Insert',  false));
+          t.appendChild(btn('select',    'Select',    false));
 
           t.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('[data-bwai]') : null;
@@ -1431,6 +1447,125 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           '.bwai-toolbar button:disabled{opacity:.3;cursor:not-allowed}'
         ].join('');
         document.head.appendChild(style);
+      })();
+    </script>
+
+    <script>
+      /* ---- inline contenteditable editing ---- */
+      (function () {
+        var root = document.getElementById('EditableContentRoot');
+
+        function getCleanHtml() {
+          if (!root) return '';
+          var clone = root.cloneNode(true);
+          var ces = clone.querySelectorAll('[contenteditable]');
+          for (var i = 0; i < ces.length; i++) ces[i].removeAttribute('contenteditable');
+          var extras = clone.querySelectorAll('.bwai-inline-popup,.bwai-toolbar');
+          for (var j = 0; j < extras.length; j++) extras[j].remove();
+          return clone.innerHTML;
+        }
+
+        function save() {
+          parent.postMessage({ type: 'bwai-inline-edit-save', html: getCleanHtml() }, '*');
+        }
+
+        function showPopup(fields, onConfirm) {
+          var existing = document.querySelector('.bwai-inline-popup');
+          if (existing) existing.remove();
+          var popup = document.createElement('div');
+          popup.className = 'bwai-inline-popup';
+          popup.style.cssText = 'position:fixed;z-index:999999;background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:260px';
+          var inputs = fields.map(function(f) {
+            var inp = document.createElement('input');
+            inp.type = 'text';
+            inp.placeholder = f.placeholder;
+            inp.value = f.value;
+            inp.style.cssText = 'border:1px solid #ddd;border-radius:4px;padding:5px 8px;font-size:12px;width:100%;box-sizing:border-box;outline:none';
+            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') btn.click(); if (e.key === 'Escape') popup.remove(); });
+            popup.appendChild(inp);
+            return inp;
+          });
+          var btn = document.createElement('button');
+          btn.textContent = 'Save';
+          btn.style.cssText = 'padding:5px 12px;border:1px solid #ff3399;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer;background:#ff3399;color:#fff;align-self:flex-end';
+          btn.addEventListener('click', function() { onConfirm(inputs.map(function(i) { return i.value; })); popup.remove(); });
+          popup.appendChild(btn);
+          document.body.appendChild(popup);
+          setTimeout(function() {
+            inputs[0].focus(); inputs[0].select();
+            var vw = window.innerWidth, vh = window.innerHeight;
+            var pr = popup.getBoundingClientRect();
+            var left = Math.min(popup._anchorX || 20, vw - pr.width - 8);
+            var top = Math.min(popup._anchorY || 20, vh - pr.height - 8);
+            popup.style.left = Math.max(8, left) + 'px';
+            popup.style.top = Math.max(8, top) + 'px';
+          }, 0);
+          document.addEventListener('mousedown', function closePopup(e) {
+            if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('mousedown', closePopup); }
+          }, true);
+          return popup;
+        }
+
+        function showLinkPopup(anchor) {
+          var rect = anchor.getBoundingClientRect();
+          var popup = showPopup(
+            [{ placeholder: 'URL', value: anchor.getAttribute('href') || '' }],
+            function(vals) { anchor.setAttribute('href', vals[0]); save(); }
+          );
+          popup._anchorX = rect.left;
+          popup._anchorY = rect.bottom + 4;
+        }
+
+        function showImagePopup(img) {
+          var rect = img.getBoundingClientRect();
+          var popup = showPopup(
+            [
+              { placeholder: 'Image URL', value: img.getAttribute('src') || '' },
+              { placeholder: 'Alt text', value: img.getAttribute('alt') || '' }
+            ],
+            function(vals) { img.setAttribute('src', vals[0]); img.setAttribute('alt', vals[1]); save(); }
+          );
+          popup._anchorX = rect.left;
+          popup._anchorY = rect.bottom + 4;
+        }
+
+        function enableEditing() {
+          if (!root) return;
+          var textEls = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,td,th,span,button');
+          for (var i = 0; i < textEls.length; i++) {
+            var el = textEls[i];
+            if (el.closest('.bwai-toolbar') || el.closest('.bwai-inline-popup')) continue;
+            if (el.contentEditable === 'true') continue;
+            el.contentEditable = 'true';
+            el.addEventListener('blur', save);
+          }
+          var links = root.querySelectorAll('a');
+          for (var j = 0; j < links.length; j++) {
+            var a = links[j];
+            if (a.closest('.bwai-toolbar') || a.closest('.bwai-inline-popup')) continue;
+            if (a.dataset.bwaiEditBound) continue;
+            a.dataset.bwaiEditBound = '1';
+            a.addEventListener('click', function(e) { e.preventDefault(); showLinkPopup(this); });
+            a.addEventListener('blur', save);
+          }
+          var imgs = root.querySelectorAll('img');
+          for (var k = 0; k < imgs.length; k++) {
+            var img = imgs[k];
+            if (img.closest('.bwai-toolbar') || img.closest('.bwai-inline-popup')) continue;
+            if (img.dataset.bwaiEditBound) continue;
+            img.dataset.bwaiEditBound = '1';
+            img.style.cursor = 'pointer';
+            img.addEventListener('click', function(e) { e.stopPropagation(); showImagePopup(this); });
+          }
+        }
+
+        enableEditing();
+
+        window.addEventListener('message', function(e) {
+          if (e.data && e.data.type === 'bwai-patch') {
+            setTimeout(enableEditing, 0);
+          }
+        });
       })();
     </script>
 

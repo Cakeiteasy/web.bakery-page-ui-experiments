@@ -23,7 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const db = client.db(dbName);
     const col = db.collection(COLLECTION);
 
-    const { id, action } = req.query as Record<string, string>;
+    const { id, action, slug: slugParam } = req.query as Record<string, string>;
 
     // ── POST ?id=xxx&action=duplicate ──────────────────────────────────────
     if (req.method === 'POST' && id && action === 'duplicate') {
@@ -56,6 +56,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── GET ?id=xxx ────────────────────────────────────────────────────────
     if (req.method === 'GET' && id) {
       const page = await col.findOne({ _id: new ObjectId(id) });
+      if (!page) return res.status(404).json({ error: 'Page not found' });
+      return res.status(200).json(toFull(page));
+    }
+
+    // ── GET ?slug=xxx ──────────────────────────────────────────────────────
+    if (req.method === 'GET' && slugParam) {
+      const page = await col.findOne({ slug: slugParam });
       if (!page) return res.status(404).json({ error: 'Page not found' });
       return res.status(200).json(toFull(page));
     }
