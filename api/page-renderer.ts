@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import clientPromise, { dbName } from '../lib/mongodb';
+import clientPromise, { dbName } from '../lib/mongodb.js';
 import { buildPublishedDocument } from '../lib/build-preview';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
