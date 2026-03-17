@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import clientPromise, { dbName } from '../lib/mongodb';
-import { buildPublishedDocument } from '../lib/build-preview';
+import clientPromise, { dbName } from '../lib/mongodb.js';
+import { buildPublishedDocument } from '../lib/build-preview.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Accept slug from query param (?slug=xxx) as well as from the URL path.

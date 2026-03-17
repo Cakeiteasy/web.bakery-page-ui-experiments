@@ -594,7 +594,7 @@ body {
 .footer__nav-title {
   margin: 0;
   font: var(--font-ml);
-  font-size: 1.85rem;
+  font-size: 1.5rem;
   line-height: 1.05;
   color: var(--cie-text);
 }
@@ -738,7 +738,7 @@ body {
   }
 
   .footer__nav-title {
-    font-size: 1.55rem;
+    font-size: 1.2rem;
   }
 }
 `;

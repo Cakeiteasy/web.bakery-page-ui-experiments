@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ObjectId } from 'mongodb';
-import clientPromise, { dbName } from '../lib/mongodb';
+import clientPromise, { dbName } from '../lib/mongodb.js';
 
 const COLLECTION = 'bwai_pages';
 

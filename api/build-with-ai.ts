@@ -2,7 +2,7 @@ import { streamText, CoreMessage } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 
-import { COMPONENT_LIBRARY_PROMPT, SYSTEM_PROMPT } from './build-with-ai.prompt';
+import { COMPONENT_LIBRARY_PROMPT, SYSTEM_PROMPT } from './build-with-ai.prompt.js';
 
 interface IncomingAttachment {
   id: string;
