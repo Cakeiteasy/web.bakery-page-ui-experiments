@@ -1,5 +1,4 @@
 import { Injectable } from '@angular/core';
-import { parseTemplate } from '@angular/compiler';
 
 import { BuildWithAiEditableFiles, BuildWithAiValidationIssue, BuildWithAiValidationResult } from '../models/build-with-ai.model';
 
@@ -19,17 +18,21 @@ export class BuildWithAiSyntaxValidatorService {
   }
 
   private validateHtml(html: string): BuildWithAiValidationIssue[] {
-    const parsed = parseTemplate(html, 'content.html');
-    const issues: BuildWithAiValidationIssue[] = [];
+    if (!html.trim()) return [];
 
-    for (const error of parsed.errors ?? []) {
-      issues.push({
-        file: 'content.html',
-        message: error.msg
-      });
+    // Use DOMParser so that `@` characters (social handles, emails, CSS at-rules
+    // inside <style> tags) are never misread as Angular template block syntax.
+    try {
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const err = doc.querySelector('parsererror');
+      if (err) {
+        return [{ file: 'content.html', message: err.textContent ?? 'Invalid HTML' }];
+      }
+    } catch (error) {
+      return [{ file: 'content.html', message: error instanceof Error ? error.message : 'Invalid HTML syntax.' }];
     }
 
-    return issues;
+    return [];
   }
 
   private validateCss(css: string): BuildWithAiValidationIssue[] {

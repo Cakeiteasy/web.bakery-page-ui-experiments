@@ -1,0 +1,86 @@
+<div class="modal-backdrop" (click)="onBackdropClick($event)">
+  <div class="modal">
+
+    <div class="modal__header">
+      <h2>Generation Settings</h2>
+      <button class="modal__close" (click)="closed.emit()" title="Close">✕</button>
+    </div>
+
+    <div class="modal__body">
+
+      <!-- System Prompt Override -->
+      <section class="modal__section">
+        <label class="modal__label">System prompt override <span class="modal__label-note">(global)</span></label>
+        <p class="modal__hint">Leave blank to use the default system prompt. If set, this replaces the AI instructions for all pages.</p>
+        <textarea
+          class="modal__textarea"
+          rows="6"
+          [(ngModel)]="systemPromptOverride"
+          placeholder="Enter custom system prompt…"></textarea>
+      </section>
+
+      <!-- Model -->
+      <section class="modal__section">
+        <label class="modal__label">AI model <span class="modal__label-note">(this page)</span></label>
+        <select class="modal__select" [(ngModel)]="modelKey">
+          <option *ngFor="let m of models" [value]="m.key">{{ m.label }}</option>
+        </select>
+      </section>
+
+      <!-- Font Pair -->
+      <section class="modal__section">
+        <label class="modal__label">Font pair <span class="modal__label-note">(this page)</span></label>
+        <div class="font-pairs">
+          <label
+            *ngFor="let pair of fontPairs"
+            class="font-pair"
+            [class.font-pair--selected]="fontPair === pair.id">
+            <input type="radio" name="fontPair" [value]="pair.id" [(ngModel)]="fontPair" />
+            <div class="font-pair__card">
+              <span class="font-pair__label">{{ pair.label }}</span>
+              <span class="font-pair__serif" [style.font-family]="pair.serifVar + ', serif'">Aa</span>
+              <span class="font-pair__names">{{ pair.serifVar }} + {{ pair.sansVar }}</span>
+            </div>
+          </label>
+        </div>
+      </section>
+
+      <!-- Accent Color -->
+      <section class="modal__section">
+        <label class="modal__label">Accent color <span class="modal__label-note">(this page)</span></label>
+        <div class="accent-row">
+          <button
+            *ngFor="let preset of accentPresets"
+            class="accent-swatch"
+            [class.accent-swatch--selected]="accentColor === preset.value"
+            [style.background]="preset.value"
+            [title]="preset.label"
+            type="button"
+            (click)="accentColor = preset.value"></button>
+          <button
+            class="accent-swatch accent-swatch--reset"
+            [class.accent-swatch--selected]="accentColor === null"
+            title="Default (rose)"
+            type="button"
+            (click)="accentColor = null">↺</button>
+        </div>
+        <div class="accent-custom-row">
+          <label class="modal__label-sm">Custom color</label>
+          <input
+            type="color"
+            class="accent-picker"
+            [value]="accentColor ?? '#ff3399'"
+            (input)="accentColor = $any($event.target).value" />
+          <span class="accent-value">{{ accentColor ?? '#ff3399 (default)' }}</span>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="modal__footer">
+      <button class="modal__btn modal__btn--cancel" type="button" (click)="closed.emit()">Cancel</button>
+      <button class="modal__btn modal__btn--save" type="button" (click)="onSave()">Save settings</button>
+    </div>
+
+  </div>
+</div>

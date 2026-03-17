@@ -1,36 +1,101 @@
-(() => {
-  const counters = Array.from(document.querySelectorAll('[data-counter]'));
+/* Scroll entrance */
+(function () {
+  var els = document.querySelectorAll(
+    '.lp-hero,.lp-trust,.lp-stats-bar,.lp-props,.lp-how,.lp-showcase,.lp-proof,.lp-guarantee,.lp-faq,.lp-cta-final'
+  );
+  if (!('IntersectionObserver' in window)) {
+    els.forEach(function (el) { el.classList.add('in-view'); });
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { e.target.classList.add('in-view'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.07 });
+  els.forEach(function (el) { io.observe(el); });
+})();
 
-  counters.forEach((node, index) => {
-    const rawValue = node.getAttribute('data-counter') || '0';
-    const numeric = Number.parseFloat(rawValue.replace('+', ''));
-    if (!Number.isFinite(numeric)) {
-      return;
+/* Counter animation */
+(function () {
+  var stats = document.querySelectorAll('.lp-stat__num[data-counter]');
+  if (!stats.length || !('IntersectionObserver' in window)) { return; }
+  var done = false;
+
+  function run(el) {
+    var raw = el.getAttribute('data-counter');
+    var target = parseFloat(raw);
+    var dec = target % 1 !== 0;
+    var dur = 1500;
+    var t0 = null;
+    function step(ts) {
+      if (!t0) t0 = ts;
+      var p = Math.min((ts - t0) / dur, 1);
+      var e = 1 - Math.pow(1 - p, 3);
+      var v = e * target;
+      if (target >= 1000) el.textContent = Math.round(v).toLocaleString('en') + '+';
+      else if (dec) el.textContent = v.toFixed(1);
+      else el.textContent = Math.round(v) + '+';
+      if (p < 1) { requestAnimationFrame(step); }
+      else {
+        if (target >= 200000) el.textContent = '200,000+';
+        else if (target >= 1000) el.textContent = Math.round(target).toLocaleString('en') + '+';
+        else if (dec) el.textContent = target.toFixed(1);
+        else el.textContent = target + '+';
+      }
     }
+    requestAnimationFrame(step);
+  }
 
-    const duration = 900 + index * 180;
-    const startedAt = performance.now();
-    const hasDecimal = rawValue.includes('.');
-    const hasPlus = rawValue.includes('+');
+  var sio = new IntersectionObserver(function (entries) {
+    if (entries[0].isIntersecting && !done) {
+      done = true;
+      stats.forEach(run);
+      sio.disconnect();
+    }
+  }, { threshold: 0.4 });
 
-    const tick = (now) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const value = numeric * eased;
+  var section = document.querySelector('.lp-stats-bar');
+  if (section) sio.observe(section);
+})();
 
-      if (hasDecimal) {
-        node.textContent = value.toFixed(1);
+/* FAQ smooth toggle */
+(function () {
+  document.querySelectorAll('.lp-faq__item').forEach(function (details) {
+    var summary = details.querySelector('summary');
+    var p = details.querySelector('p');
+    if (!summary || !p) return;
+    summary.addEventListener('click', function (e) {
+      e.preventDefault();
+      var open = details.hasAttribute('open');
+      if (open) {
+        p.style.maxHeight = p.scrollHeight + 'px';
+        p.style.overflow = 'hidden';
+        requestAnimationFrame(function () {
+          p.style.transition = 'max-height .26s ease, opacity .2s ease';
+          p.style.maxHeight = '0';
+          p.style.opacity = '0';
+          setTimeout(function () { details.removeAttribute('open'); p.style.cssText = ''; }, 280);
+        });
       } else {
-        node.textContent = String(Math.round(value));
+        details.setAttribute('open', '');
+        p.style.maxHeight = '0'; p.style.opacity = '0'; p.style.overflow = 'hidden';
+        requestAnimationFrame(function () {
+          p.style.transition = 'max-height .3s ease, opacity .24s ease';
+          p.style.maxHeight = p.scrollHeight + 'px';
+          p.style.opacity = '1';
+          setTimeout(function () { p.style.cssText = ''; }, 320);
+        });
       }
+    });
+  });
+})();
 
-      if (progress < 1) {
-        requestAnimationFrame(tick);
-      } else if (hasPlus) {
-        node.textContent = `${Math.round(numeric)}+`;
-      }
-    };
-
-    requestAnimationFrame(tick);
+/* Smooth anchor scroll */
+(function () {
+  document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      var t = document.querySelector(a.getAttribute('href'));
+      if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    });
   });
 })();

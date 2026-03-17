@@ -1,0 +1,71 @@
+<div class="modal-backdrop" (click)="onBackdropClick($event)">
+  <div class="modal">
+    <header class="modal__header">
+      <h2>New page</h2>
+      <button type="button" class="modal__close" (click)="onClose()" aria-label="Close">✕</button>
+    </header>
+
+    <div class="modal__tabs">
+      <button
+        type="button"
+        class="tab-btn"
+        [class.tab-btn--active]="mode() === 'blank'"
+        (click)="setMode('blank')"
+      >Blank</button>
+      <button
+        type="button"
+        class="tab-btn"
+        [class.tab-btn--active]="mode() === 'ai'"
+        (click)="setMode('ai')"
+      >AI build</button>
+    </div>
+
+    <div class="modal__body">
+      <div class="field-group">
+        <label class="field-label">Page name</label>
+        <input
+          type="text"
+          class="field-input"
+          [ngModel]="title()"
+          (ngModelChange)="onTitleChange($event)"
+          placeholder="e.g. Home, Pricing, Blog"
+          autofocus
+        />
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">URL slug</label>
+        <input
+          type="text"
+          class="field-input"
+          [ngModel]="slug()"
+          (ngModelChange)="onSlugChange($event)"
+          placeholder="home"
+        />
+      </div>
+
+      <div class="field-group" *ngIf="mode() === 'ai'">
+        <label class="field-label">
+          Describe the page
+          <span class="field-hint">One sentence is enough</span>
+        </label>
+        <textarea
+          class="field-input"
+          rows="3"
+          [ngModel]="description()"
+          (ngModelChange)="description.set($event)"
+          placeholder="A landing page for a cake delivery service targeting corporate clients…"
+        ></textarea>
+      </div>
+
+      <p class="field-error" *ngIf="error()">{{ error() }}</p>
+    </div>
+
+    <footer class="modal__footer">
+      <button type="button" class="btn-ghost" (click)="onClose()">Cancel</button>
+      <button type="button" class="btn-primary" (click)="onCreate()">
+        {{ mode() === 'ai' ? 'Create &amp; Build' : 'Create' }}
+      </button>
+    </footer>
+  </div>
+</div>

@@ -1,4 +1,4 @@
-import { generateText } from 'ai';
+import { streamText, CoreMessage } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 
@@ -31,18 +31,26 @@ interface IncomingBody {
   modelKey: string;
   messages: IncomingMessage[];
   files: IncomingFiles;
+  systemPromptOverride?: string | null;
+}
+
+interface SearchReplaceEdit {
+  file: string;
+  search: string;
+  replace: string;
 }
 
 interface ParsedModelPayload {
   assistantText: string;
-  diff: string;
+  edits: SearchReplaceEdit[];
   warnings: string[];
 }
 
-const MODEL_REGISTRY: Record<string, { provider: 'openai' | 'google'; modelId: string }> = {
+const MODEL_REGISTRY: Record<string, { provider: 'openai' | 'google'; modelId: string; reasoningModel?: boolean }> = {
   'openai:gpt-5.1': {
     provider: 'openai',
-    modelId: 'gpt-5.1'
+    modelId: 'gpt-5.1',
+    reasoningModel: true
   },
   'google:gemini-3-flash': {
     provider: 'google',
@@ -66,6 +74,7 @@ export default async function handler(req: any, res: any): Promise<void> {
   // }
 
   try {
+    const t0 = Date.now();
     const payload = parseIncomingBody(req.body);
 
     const modelConfig = MODEL_REGISTRY[payload.modelKey];
@@ -89,30 +98,38 @@ export default async function handler(req: any, res: any): Promise<void> {
     const messages = buildCoreMessages(payload.messages);
     messages.unshift({
       role: 'user',
-      content: `\n${contextFileDump}\n\nUse unified diff patching for updates.`
+      content: `\n${contextFileDump}`
     });
 
-    const result = await generateText({
+    const systemPrompt = payload.systemPromptOverride?.trim()
+      ? payload.systemPromptOverride.trim()
+      : `${SYSTEM_PROMPT}\n${COMPONENT_LIBRARY_PROMPT}`;
+
+    const promptChars = systemPrompt.length + messages.reduce((n, m) => n + JSON.stringify(m.content).length, 0);
+    console.log(`[bwai] model=${payload.modelKey} promptChars=${promptChars} messages=${payload.messages.length}`);
+
+    // Stream response so Vercel doesn't kill the function on long LLM calls
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.status(200);
+
+    const tLlm = Date.now();
+    const stream = streamText({
       model,
-      system: `${SYSTEM_PROMPT}\n${COMPONENT_LIBRARY_PROMPT}`,
+      system: systemPrompt,
       messages,
-      temperature: 0.2
+      ...(modelConfig.reasoningModel ? {} : { temperature: 0.2 })
     });
 
-    const parsed = parseModelPayload(result.text);
+    for await (const chunk of stream.textStream) {
+      res.write(chunk);
+    }
 
-    res.status(200).json({
-      assistantText: parsed.assistantText,
-      diff: parsed.diff,
-      warnings: parsed.warnings,
-      usage: result.usage
-        ? {
-            promptTokens: result.usage.promptTokens,
-            completionTokens: result.usage.completionTokens,
-            totalTokens: result.usage.totalTokens
-          }
-        : undefined
-    });
+    const usage = await stream.usage;
+    console.log(`[bwai] llm=${Date.now() - tLlm}ms total=${Date.now() - t0}ms inputTokens=${(usage as any)?.inputTokens ?? (usage as any)?.promptTokens} outputTokens=${(usage as any)?.outputTokens ?? (usage as any)?.completionTokens}`);
+
+    res.end();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate patch.';
     res.status(500).json({ error: message });
@@ -143,6 +160,7 @@ export function parseIncomingBody(raw: unknown): IncomingBody {
 
   return {
     modelKey: typedPayload.modelKey,
+    systemPromptOverride: typedPayload.systemPromptOverride ?? null,
     files: {
       html: String(files.html ?? ''),
       css: String(files.css ?? ''),
@@ -296,13 +314,17 @@ export function parseModelPayload(text: string): ParsedModelPayload {
     throw new Error('Model response is invalid.');
   }
 
-  if (!parsed.diff || typeof parsed.diff !== 'string') {
-    throw new Error('Model response missing diff string.');
+  if (!Array.isArray(parsed.edits)) {
+    throw new Error('Model response missing edits array.');
   }
 
   return {
     assistantText: typeof parsed.assistantText === 'string' ? parsed.assistantText : 'Applied the requested update.',
-    diff: parsed.diff,
+    edits: parsed.edits.map((e: any) => ({
+      file: String(e?.file ?? ''),
+      search: String(e?.search ?? ''),
+      replace: String(e?.replace ?? '')
+    })),
     warnings: Array.isArray(parsed.warnings) ? parsed.warnings.map((warning) => String(warning)) : []
   };
 }

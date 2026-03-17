@@ -10,25 +10,24 @@ describe('BuildWithAiDiffService', () => {
     service = TestBed.inject(BuildWithAiDiffService);
   });
 
-  it('applies valid unified diff to supported files', () => {
-    const result = service.applyUnifiedDiff(
-      {
-        html: '<h1>Hello</h1>',
-        css: '.a{color:red;}',
-        js: 'console.log("x")'
-      },
+  it('applies a simple replacement in html', () => {
+    const result = service.applyEdits(
+      { html: '<h1>Hello</h1>', css: '.a{color:red;}', js: 'console.log("x")' },
+      [{ file: 'content.html', search: '<h1>Hello</h1>', replace: '<h1>Hi</h1>' }]
+    );
+
+    expect(result.files.html).toBe('<h1>Hi</h1>');
+    expect(result.files.css).toBe('.a{color:red;}');
+    expect(result.touchedFiles).toEqual(['content.html']);
+  });
+
+  it('applies edits to multiple files', () => {
+    const result = service.applyEdits(
+      { html: '<h1>Hello</h1>', css: '.a{color:red;}', js: '' },
       [
-        '--- content.html',
-        '+++ content.html',
-        '@@ -1 +1 @@',
-        '-<h1>Hello</h1>',
-        '+<h1>Hi</h1>',
-        '--- content.css',
-        '+++ content.css',
-        '@@ -1 +1 @@',
-        '-.a{color:red;}',
-        '+.a{color:blue;}'
-      ].join('\n')
+        { file: 'content.html', search: 'Hello', replace: 'Hi' },
+        { file: 'content.css', search: 'red', replace: 'blue' }
+      ]
     );
 
     expect(result.files.html).toBe('<h1>Hi</h1>');
@@ -36,106 +35,61 @@ describe('BuildWithAiDiffService', () => {
     expect(result.touchedFiles).toEqual(['content.html', 'content.css']);
   });
 
-  it('rejects diff attempts to unknown files', () => {
+  it('inserts content by including surrounding context in search', () => {
+    const result = service.applyEdits(
+      { html: '<article>\n  <h3>Title</h3>\n</article>', css: '', js: '' },
+      [{
+        file: 'content.html',
+        search: '<article>\n  <h3>Title</h3>',
+        replace: '<article>\n  <img src="img.jpg">\n  <h3>Title</h3>'
+      }]
+    );
+
+    expect(result.files.html).toBe('<article>\n  <img src="img.jpg">\n  <h3>Title</h3>\n</article>');
+  });
+
+  it('applies edits in order', () => {
+    const result = service.applyEdits(
+      { html: 'aaa', css: '', js: '' },
+      [
+        { file: 'content.html', search: 'aaa', replace: 'bbb' },
+        { file: 'content.html', search: 'bbb', replace: 'ccc' }
+      ]
+    );
+
+    expect(result.files.html).toBe('ccc');
+  });
+
+  it('throws when edits array is empty', () => {
     expect(() =>
-      service.applyUnifiedDiff(
-        {
-          html: '',
-          css: '',
-          js: ''
-        },
-        ['--- evil.ts', '+++ evil.ts', '@@ -0,0 +1 @@', '+oops'].join('\n')
+      service.applyEdits({ html: '', css: '', js: '' }, [])
+    ).toThrowError(/no edits provided/i);
+  });
+
+  it('throws when targeting an unsupported file', () => {
+    expect(() =>
+      service.applyEdits(
+        { html: '', css: '', js: '' },
+        [{ file: 'evil.ts' as any, search: 'x', replace: 'y' }]
       )
     ).toThrowError(/unsupported file/i);
   });
 
-  it('rejects malformed hunks', () => {
+  it('throws when search string is not found', () => {
     expect(() =>
-      service.applyUnifiedDiff(
-        {
-          html: '<p>x</p>',
-          css: '',
-          js: ''
-        },
-        ['--- content.html', '+++ content.html', 'not-a-hunk'].join('\n')
+      service.applyEdits(
+        { html: '<p>hello</p>', css: '', js: '' },
+        [{ file: 'content.html', search: 'not-present', replace: 'x' }]
       )
-    ).toThrowError(/malformed unified diff/i);
+    ).toThrowError(/not found/i);
   });
 
-  it('accepts create-style full replacement hunks for existing files', () => {
-    const result = service.applyUnifiedDiff(
-      {
-        html: '<p>old</p>',
-        css: '',
-        js: ''
-      },
-      ['--- content.html', '+++ content.html', '@@ -0,0 +1 @@', '+<p>new</p>'].join('\n')
-    );
-
-    expect(result.files.html).toBe('<p>new</p>');
-    expect(result.touchedFiles).toEqual(['content.html']);
-  });
-
-  it('accepts patches wrapped with codex begin/end markers', () => {
-    const result = service.applyUnifiedDiff(
-      {
-        html: '<h1>Hello</h1>',
-        css: '',
-        js: ''
-      },
-      [
-        '*** Begin Patch',
-        '--- content.html',
-        '+++ content.html',
-        '@@ -1 +1 @@',
-        '-<h1>Hello</h1>',
-        '+<h1>Hi</h1>',
-        '*** End Patch'
-      ].join('\n')
-    );
-
-    expect(result.files.html).toBe('<h1>Hi</h1>');
-    expect(result.touchedFiles).toEqual(['content.html']);
-  });
-
-  it('accepts codex update-file patch envelope format', () => {
-    const result = service.applyUnifiedDiff(
-      {
-        html: '<h1>Hello</h1>',
-        css: '',
-        js: ''
-      },
-      [
-        '*** Begin Patch',
-        '*** Update File: content.html',
-        '@@',
-        '-<h1>Hello</h1>',
-        '+<h1>Hi</h1>',
-        '*** End Patch'
-      ].join('\n')
-    );
-
-    expect(result.files.html).toBe('<h1>Hi</h1>');
-    expect(result.touchedFiles).toEqual(['content.html']);
-  });
-
-  it('repairs malformed hunk line counts before parsing', () => {
-    const result = service.applyUnifiedDiff(
-      {
-        html: '<h1>Hello</h1>',
-        css: '',
-        js: ''
-      },
-      [
-        '--- content.html',
-        '+++ content.html',
-        '@@ -1,4 +1,4 @@',
-        '-<h1>Hello</h1>',
-        '+<h1>Hi</h1>'
-      ].join('\n')
-    );
-
-    expect(result.files.html).toBe('<h1>Hi</h1>');
-    expect(result.touchedFiles).toEqual(['content.html']);
+  it('throws when search string is empty', () => {
+    expect(() =>
+      service.applyEdits(
+        { html: '<p>x</p>', css: '', js: '' },
+        [{ file: 'content.html', search: '', replace: '<p>y</p>' }]
+      )
+    ).toThrowError(/must not be empty/i);
   });
 });

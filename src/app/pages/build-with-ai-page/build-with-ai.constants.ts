@@ -2,20 +2,66 @@ import { BuildWithAiModelOption } from '../../models/build-with-ai.model';
 
 export const BUILD_WITH_AI_STORAGE_KEY = 'build-with-ai-session-v1';
 
-export const BUILD_WITH_AI_MODELS: BuildWithAiModelOption[] = [
+export interface BuildWithAiFontPair {
+  id: string;
+  label: string;
+  googleFontsUrl: string;
+  serifVar: string;
+  sansVar: string;
+}
+
+export const BUILD_WITH_AI_FONT_PAIRS: BuildWithAiFontPair[] = [
   {
-    key: 'openai:gpt-5.1',
-    label: 'GPT-5.1',
-    provider: 'openai',
-    modelId: 'gpt-5.1',
-    contextLimit: 200_000
+    id: 'playfair-lato',
+    label: 'Classic',
+    googleFontsUrl: "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,700&family=Lato:wght@400;700&display=swap",
+    serifVar: 'Playfair Display',
+    sansVar: 'Lato'
   },
+  {
+    id: 'fraunces-dm',
+    label: 'Modern',
+    googleFontsUrl: "https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;1,9..144,700&family=DM+Sans:wght@400;700&display=swap",
+    serifVar: 'Fraunces',
+    sansVar: 'DM Sans'
+  },
+  {
+    id: 'cormorant-nunito',
+    label: 'Elegant',
+    googleFontsUrl: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,700;1,700&family=Nunito+Sans:wght@400;700&display=swap",
+    serifVar: 'Cormorant Garamond',
+    sansVar: 'Nunito Sans'
+  },
+  {
+    id: 'baskerville-source',
+    label: 'Traditional',
+    googleFontsUrl: "https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,700;1,400&family=Source+Sans+3:wght@400;700&display=swap",
+    serifVar: 'Libre Baskerville',
+    sansVar: 'Source Sans 3'
+  },
+  {
+    id: 'italiana-raleway',
+    label: 'Luxury',
+    googleFontsUrl: "https://fonts.googleapis.com/css2?family=Italiana&family=Raleway:wght@400;700&display=swap",
+    serifVar: 'Italiana',
+    sansVar: 'Raleway'
+  }
+];
+
+export const BUILD_WITH_AI_MODELS: BuildWithAiModelOption[] = [
   {
     key: 'google:gemini-3-flash',
     label: 'Gemini 3 Flash',
     provider: 'google',
     modelId: 'gemini-3-flash',
     contextLimit: 1_000_000
+  },
+  {
+    key: 'openai:gpt-5.1',
+    label: 'GPT-5.1',
+    provider: 'openai',
+    modelId: 'gpt-5.1',
+    contextLimit: 200_000
   }
 ];
 
@@ -239,7 +285,6 @@ ul {
 }
 
 #EditableContentRoot {
-  width: min(1100px, 92vw);
   margin: 0 auto;
   min-height: 320px;
 }

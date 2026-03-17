@@ -1,0 +1,103 @@
+<div class="modal-backdrop" (click)="onBackdropClick($event)">
+  <div class="modal">
+    <header class="modal__header">
+      <h2>Page Settings</h2>
+      <button type="button" class="modal__close" (click)="onClose()" aria-label="Close">✕</button>
+    </header>
+
+    <div class="modal__body">
+      <div class="field-group">
+        <label class="field-label">Page title</label>
+        <input
+          type="text"
+          class="field-input"
+          [ngModel]="form().title"
+          (ngModelChange)="onFieldChange('title', $event)"
+          placeholder="My landing page"
+        />
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">
+          URL slug
+          <span class="field-hint">e.g. <code>home</code> or <code>blog/cake-trends</code></span>
+        </label>
+        <div class="slug-wrap">
+          <span class="slug-prefix">cakeiteasy.no/</span>
+          <input
+            type="text"
+            class="field-input slug-input"
+            [ngModel]="form().slug"
+            (ngModelChange)="onFieldChange('slug', $event)"
+            placeholder="home"
+          />
+        </div>
+        <p class="field-error" *ngIf="slugError()">{{ slugError() }}</p>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="field-group">
+        <label class="field-label">SEO title <span class="field-hint">(shown in browser tab & search results)</span></label>
+        <input
+          type="text"
+          class="field-input"
+          [ngModel]="form().seoTitle"
+          (ngModelChange)="onFieldChange('seoTitle', $event)"
+          placeholder="Same as page title if empty"
+        />
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">SEO description</label>
+        <textarea
+          class="field-input"
+          rows="2"
+          [ngModel]="form().seoDescription"
+          (ngModelChange)="onFieldChange('seoDescription', $event)"
+          placeholder="150–160 char summary for search engines"
+        ></textarea>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="field-group">
+        <label class="field-label">OG title <span class="field-hint">(social share title)</span></label>
+        <input
+          type="text"
+          class="field-input"
+          [ngModel]="form().ogTitle"
+          (ngModelChange)="onFieldChange('ogTitle', $event)"
+          placeholder="Same as SEO title if empty"
+        />
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">OG description</label>
+        <textarea
+          class="field-input"
+          rows="2"
+          [ngModel]="form().ogDescription"
+          (ngModelChange)="onFieldChange('ogDescription', $event)"
+          placeholder="Same as SEO description if empty"
+        ></textarea>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">OG image URL</label>
+        <input
+          type="url"
+          class="field-input"
+          [ngModel]="form().ogImageUrl"
+          (ngModelChange)="onFieldChange('ogImageUrl', $event)"
+          placeholder="https://…"
+        />
+      </div>
+    </div>
+
+    <footer class="modal__footer">
+      <button type="button" class="btn-ghost" (click)="onClose()">Cancel</button>
+      <button type="button" class="btn-primary" (click)="onSave()">Save</button>
+    </footer>
+  </div>
+</div>

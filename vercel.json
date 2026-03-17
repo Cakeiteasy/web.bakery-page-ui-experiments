@@ -16,8 +16,20 @@
       "handle": "filesystem"
     },
     {
-      "src": "/(.*)",
+      "src": "/products/(.*)",
       "dest": "/index.html"
+    },
+    {
+      "src": "/pages(.*)",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/",
+      "dest": "/index.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/page-renderer.ts"
     }
   ]
 }

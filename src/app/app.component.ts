@@ -133,7 +133,7 @@ export class AppComponent implements OnInit {
   }
 
   private isBuildWithAiUrl(url: string): boolean {
-    return url === '/build-with-ai' || url.startsWith('/build-with-ai?') || url.startsWith('/build-with-ai/');
+    return url === '/pages' || url.startsWith('/pages/') || url.startsWith('/pages?');
   }
 
   private async loadBranding(): Promise<void> {

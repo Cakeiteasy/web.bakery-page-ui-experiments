@@ -57,6 +57,7 @@ export interface BuildWithAiApiRequest {
   modelKey: string;
   messages: BuildWithAiChatMessage[];
   files: BuildWithAiEditableFiles;
+  systemPromptOverride?: string | null;
 }
 
 export interface BuildWithAiUsage {
@@ -65,9 +66,15 @@ export interface BuildWithAiUsage {
   totalTokens?: number;
 }
 
+export interface BuildWithAiSearchReplaceEdit {
+  file: BuildWithAiEditableFileName;
+  search: string;
+  replace: string;
+}
+
 export interface BuildWithAiApiResponse {
   assistantText: string;
-  diff: string;
+  edits: BuildWithAiSearchReplaceEdit[];
   warnings: string[];
   usage?: BuildWithAiUsage;
 }
