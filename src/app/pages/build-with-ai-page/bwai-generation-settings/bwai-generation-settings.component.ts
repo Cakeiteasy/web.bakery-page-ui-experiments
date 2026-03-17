@@ -5,12 +5,14 @@ import { FormsModule } from '@angular/forms';
 import { BUILD_WITH_AI_FONT_PAIRS, BUILD_WITH_AI_MODELS, BuildWithAiFontPair } from '../build-with-ai.constants';
 
 export const BWAI_SYSTEM_PROMPT_LS_KEY = 'bwai-system-prompt-override';
+export const BWAI_DEMO_KEY_LS_KEY = 'bwai-demo-key';
 
 export interface BwaiGenerationSettings {
   modelKey: string;
   fontPair: string;
   accentColor: string | null;
   systemPromptOverride: string | null;
+  demoKey: string | null;
 }
 
 @Component({
@@ -43,12 +45,14 @@ export class BwaiGenerationSettingsComponent implements OnInit {
   fontPair = 'playfair-lato';
   accentColor: string | null = null;
   systemPromptOverride = '';
+  demoKey = '';
 
   ngOnInit(): void {
     this.modelKey = this.currentModelKey;
     this.fontPair = this.currentFontPair ?? 'playfair-lato';
     this.accentColor = this.currentAccentColor;
     this.systemPromptOverride = localStorage.getItem(BWAI_SYSTEM_PROMPT_LS_KEY) ?? '';
+    this.demoKey = localStorage.getItem(BWAI_DEMO_KEY_LS_KEY) ?? '';
   }
 
   onSave(): void {
@@ -58,11 +62,18 @@ export class BwaiGenerationSettingsComponent implements OnInit {
     } else {
       localStorage.removeItem(BWAI_SYSTEM_PROMPT_LS_KEY);
     }
+    const trimmedKey = this.demoKey.trim();
+    if (trimmedKey) {
+      localStorage.setItem(BWAI_DEMO_KEY_LS_KEY, trimmedKey);
+    } else {
+      localStorage.removeItem(BWAI_DEMO_KEY_LS_KEY);
+    }
     this.saved.emit({
       modelKey: this.modelKey,
       fontPair: this.fontPair,
       accentColor: this.accentColor,
-      systemPromptOverride: trimmedPrompt || null
+      systemPromptOverride: trimmedPrompt || null,
+      demoKey: trimmedKey || null
     });
   }
 

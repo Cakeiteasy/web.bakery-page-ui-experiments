@@ -28,6 +28,10 @@
       "dest": "/index.html"
     },
     {
+      "src": "/api/upload-image",
+      "dest": "/api/upload-image.ts"
+    },
+    {
       "src": "/(.*)",
       "dest": "/api/page-renderer.ts"
     }

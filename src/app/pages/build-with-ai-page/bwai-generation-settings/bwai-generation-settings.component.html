@@ -8,6 +8,17 @@
 
     <div class="modal__body">
 
+      <!-- Demo Key -->
+      <section class="modal__section">
+        <label class="modal__label">Demo key <span class="modal__label-note">(global)</span></label>
+        <p class="modal__hint">Required when the server is protected by a demo key. Leave blank if not needed.</p>
+        <input
+          type="password"
+          class="modal__input"
+          [(ngModel)]="demoKey"
+          placeholder="Enter demo key…" />
+      </section>
+
       <!-- System Prompt Override -->
       <section class="modal__section">
         <label class="modal__label">System prompt override <span class="modal__label-note">(global)</span></label>

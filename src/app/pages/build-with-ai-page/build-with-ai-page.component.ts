@@ -43,7 +43,8 @@ import { BwaiNewPageDialogComponent, NewPageResult } from './bwai-new-page-dialo
 import {
   BwaiGenerationSettingsComponent,
   BwaiGenerationSettings,
-  BWAI_SYSTEM_PROMPT_LS_KEY
+  BWAI_SYSTEM_PROMPT_LS_KEY,
+  BWAI_DEMO_KEY_LS_KEY
 } from './bwai-generation-settings/bwai-generation-settings.component';
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'build-with-ai-sidebar-width';
@@ -127,8 +128,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   readonly showGenerationSettings = signal<boolean>(false);
   readonly activeTab = signal<'chat' | 'versions'>('chat');
   readonly copiedToast = signal<boolean>(false);
+  readonly uploadingCount = signal<number>(0);
   readonly systemPromptOverride = signal<string | null>(
     localStorage.getItem(BWAI_SYSTEM_PROMPT_LS_KEY) || null
+  );
+  readonly demoKey = signal<string | null>(
+    localStorage.getItem(BWAI_DEMO_KEY_LS_KEY) || null
   );
   readonly reviewingPatchId = signal<string | null>(null);
 
@@ -442,6 +447,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   async onSaveGenerationSettings(settings: BwaiGenerationSettings): Promise<void> {
     this.showGenerationSettings.set(false);
     this.systemPromptOverride.set(settings.systemPromptOverride);
+    this.demoKey.set(settings.demoKey);
     this.selectedModelKey.set(settings.modelKey);
 
     const page = this.currentPage();
@@ -944,7 +950,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           messages: trimmedMessages,
           files: this.files(),
           systemPromptOverride: this.systemPromptOverride()
-        }
+        },
+        this.demoKey() ?? undefined
       );
 
       if (!response.edits?.length) {
@@ -1074,50 +1081,40 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   }
 
   private async appendAttachments(fileList: FileList): Promise<void> {
-    const files = Array.from(fileList).filter((file) => file.type.startsWith('image/'));
+    const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'));
     if (!files.length) {
       this.setError('validation', 'Only image files are supported for drag and drop.');
       return;
     }
 
-    const attachments: BuildWithAiAttachment[] = [];
+    this.uploadingCount.update((n) => n + files.length);
+    const uploaded: BuildWithAiAttachment[] = [];
+    const failed: string[] = [];
 
-    for (const file of files) {
-      const dataUrl = await this.readFileAsDataUrl(file);
-      attachments.push({
-        id: this.createId('att'),
-        name: file.name,
-        mimeType: file.type,
-        sizeBytes: file.size,
-        kind: 'data-url',
-        dataUrl
-      });
-    }
-
-    this.pendingAttachments.update((existing) => [...existing, ...attachments]);
-  }
-
-  private readFileAsDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onerror = () => {
-        reject(new Error(`Failed to read ${file.name}.`));
-      };
-
-      reader.onload = () => {
-        const result = reader.result;
-        if (typeof result !== 'string') {
-          reject(new Error(`Failed to read ${file.name}.`));
-          return;
+    await Promise.all(
+      files.map(async (file) => {
+        try {
+          const url = await this.apiService.uploadImageAsync(file);
+          uploaded.push({
+            id: this.createId('att'),
+            name: file.name,
+            mimeType: file.type,
+            sizeBytes: file.size,
+            kind: 'url',
+            url
+          });
+        } catch {
+          failed.push(file.name);
+        } finally {
+          this.uploadingCount.update((n) => n - 1);
         }
+      })
+    );
 
-        resolve(result);
-      };
-
-      reader.readAsDataURL(file);
-    });
+    if (uploaded.length) this.pendingAttachments.update((e) => [...e, ...uploaded]);
+    if (failed.length) this.setError('api', `Failed to upload: ${failed.join(', ')}`);
   }
+
 
   private sendToIframe(message: object): void {
     this.previewIframe?.nativeElement.contentWindow?.postMessage(message, '*');
@@ -1460,7 +1457,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var clone = root.cloneNode(true);
           var ces = clone.querySelectorAll('[contenteditable]');
           for (var i = 0; i < ces.length; i++) ces[i].removeAttribute('contenteditable');
-          var extras = clone.querySelectorAll('.bwai-inline-popup,.bwai-toolbar');
+          var extras = clone.querySelectorAll('.bwai-inline-popup,.bwai-toolbar,.bwai-link-bar');
           for (var j = 0; j < extras.length; j++) extras[j].remove();
           return clone.innerHTML;
         }
@@ -1506,14 +1503,96 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           return popup;
         }
 
-        function showLinkPopup(anchor) {
-          var rect = anchor.getBoundingClientRect();
-          var popup = showPopup(
-            [{ placeholder: 'URL', value: anchor.getAttribute('href') || '' }],
-            function(vals) { anchor.setAttribute('href', vals[0]); save(); }
-          );
-          popup._anchorX = rect.left;
-          popup._anchorY = rect.bottom + 4;
+        function showLinkEditBar(anchor) {
+          var existing = document.querySelector('.bwai-link-bar');
+          if (existing && existing._anchor === anchor) return;
+          if (existing) existing.remove();
+
+          var origHref = anchor.getAttribute('href') || '';
+          var origTarget = anchor.getAttribute('target') || '';
+          var origRel = anchor.getAttribute('rel') || '';
+
+          var bar = document.createElement('div');
+          bar.className = 'bwai-inline-popup bwai-link-bar';
+          bar._anchor = anchor;
+          bar.style.cssText = 'position:fixed;z-index:999999;background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:300px';
+
+          var urlInput = document.createElement('input');
+          urlInput.type = 'text';
+          urlInput.placeholder = 'URL';
+          urlInput.value = origHref;
+          urlInput.style.cssText = 'border:1px solid #ddd;border-radius:4px;padding:4px 8px;font-size:12px;flex:1;outline:none;min-width:0';
+
+          var tabLabel = document.createElement('label');
+          tabLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#666;flex-shrink:0;cursor:pointer;white-space:nowrap';
+          var tabCheck = document.createElement('input');
+          tabCheck.type = 'checkbox';
+          tabCheck.checked = origTarget === '_blank';
+          tabLabel.appendChild(tabCheck);
+          tabLabel.appendChild(document.createTextNode(' New tab'));
+
+          var saveBtn = document.createElement('button');
+          saveBtn.textContent = '✓';
+          saveBtn.title = 'Save';
+          saveBtn.style.cssText = 'width:24px;height:24px;border:1px solid #22c55e;border-radius:4px;background:#22c55e;color:#fff;font-size:13px;cursor:pointer;flex-shrink:0;padding:0;line-height:1';
+
+          var cancelBtn = document.createElement('button');
+          cancelBtn.textContent = '✕';
+          cancelBtn.title = 'Cancel';
+          cancelBtn.style.cssText = 'width:24px;height:24px;border:1px solid #111;border-radius:4px;background:#111;color:#fff;font-size:11px;cursor:pointer;flex-shrink:0;padding:0;line-height:1';
+
+          function applyAndClose() {
+            var href = urlInput.value.trim();
+            if (href) anchor.setAttribute('href', href); else anchor.removeAttribute('href');
+            if (tabCheck.checked) { anchor.setAttribute('target', '_blank'); anchor.setAttribute('rel', 'noopener noreferrer'); }
+            else { anchor.removeAttribute('target'); anchor.removeAttribute('rel'); }
+            save();
+            bar.remove();
+            document.removeEventListener('focusin', onFocusIn);
+          }
+
+          function cancelAndClose() {
+            if (origHref) anchor.setAttribute('href', origHref); else anchor.removeAttribute('href');
+            if (origTarget) anchor.setAttribute('target', origTarget); else anchor.removeAttribute('target');
+            if (origRel) anchor.setAttribute('rel', origRel); else anchor.removeAttribute('rel');
+            bar.remove();
+            document.removeEventListener('focusin', onFocusIn);
+          }
+
+          saveBtn.addEventListener('click', function(e) { e.stopPropagation(); applyAndClose(); });
+          cancelBtn.addEventListener('click', function(e) { e.stopPropagation(); cancelAndClose(); });
+          urlInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); applyAndClose(); }
+            if (e.key === 'Escape') cancelAndClose();
+          });
+          tabCheck.addEventListener('change', function() {
+            if (tabCheck.checked) { anchor.setAttribute('target', '_blank'); anchor.setAttribute('rel', 'noopener noreferrer'); }
+            else { anchor.removeAttribute('target'); anchor.removeAttribute('rel'); }
+          });
+
+          bar.appendChild(urlInput);
+          bar.appendChild(tabLabel);
+          bar.appendChild(saveBtn);
+          bar.appendChild(cancelBtn);
+          document.body.appendChild(bar);
+
+          setTimeout(function() {
+            var rect = anchor.getBoundingClientRect();
+            var vw = window.innerWidth, vh = window.innerHeight;
+            var br = bar.getBoundingClientRect();
+            var top = rect.bottom + 4;
+            if (top + br.height > vh - 8) top = rect.top - br.height - 4;
+            bar.style.left = Math.max(8, Math.min(rect.left, vw - br.width - 8)) + 'px';
+            bar.style.top = Math.max(8, top) + 'px';
+            urlInput.focus(); urlInput.select();
+          }, 0);
+
+          function onFocusIn(e) {
+            if (!bar.contains(e.target) && e.target !== anchor) {
+              applyAndClose();
+            }
+          }
+          document.addEventListener('focusin', onFocusIn);
         }
 
         function showImagePopup(img) {
@@ -1542,11 +1621,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var links = root.querySelectorAll('a');
           for (var j = 0; j < links.length; j++) {
             var a = links[j];
-            if (a.closest('.bwai-toolbar') || a.closest('.bwai-inline-popup')) continue;
+            if (a.closest('.bwai-toolbar') || a.closest('.bwai-inline-popup') || a.closest('.bwai-link-bar')) continue;
             if (a.dataset.bwaiEditBound) continue;
             a.dataset.bwaiEditBound = '1';
-            a.addEventListener('click', function(e) { e.preventDefault(); showLinkPopup(this); });
+            a.contentEditable = 'true';
             a.addEventListener('blur', save);
+            (function(el) {
+              el.addEventListener('focus', function() { showLinkEditBar(el); });
+            })(a);
           }
           var imgs = root.querySelectorAll('img');
           for (var k = 0; k < imgs.length; k++) {

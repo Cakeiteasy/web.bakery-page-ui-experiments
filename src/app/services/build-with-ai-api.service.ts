@@ -33,6 +33,37 @@ export class BuildWithAiApiService {
     return this.parseStreamedPayload(rawText);
   }
 
+  async uploadImageAsync(file: File, demoKey?: string): Promise<string> {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}.`));
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsDataURL(file);
+    });
+    const base64 = dataUrl.split(',')[1];
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const key = demoKey?.trim();
+    if (key) headers['x-demo-key'] = key;
+
+    const response = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ filename: file.name, mimeType: file.type, data: base64 })
+    });
+
+    if (!response.ok) {
+      let msg = `Upload failed (${response.status}).`;
+      try {
+        const body = await response.json();
+        if (body.error) msg = String(body.error);
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const { url } = await response.json();
+    return String(url);
+  }
+
   async requestVisualReview(html: string, modelKey: string): Promise<{ review: string }> {
     return firstValueFrom(
       this.http.post<{ review: string }>('/api/visual-review', { html, modelKey })

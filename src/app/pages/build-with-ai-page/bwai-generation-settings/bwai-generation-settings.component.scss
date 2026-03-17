@@ -101,6 +101,22 @@
   }
 }
 
+.modal__input {
+  font-size: 0.88rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  color: #333;
+  background: #fff;
+  width: 100%;
+
+  &:focus {
+    outline: none;
+    border-color: #ff3399;
+    box-shadow: 0 0 0 2px rgba(255, 51, 153, 0.12);
+  }
+}
+
 .modal__select {
   font-size: 0.88rem;
   padding: 0.5rem 0.75rem;
