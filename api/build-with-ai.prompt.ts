@@ -44,9 +44,9 @@ Output format:
 
 Edit rules:
 - Each edit object must include "mode": either "insert" or "replace".
-- Use "insert" only when the target file is currently empty (nothing between its `--- filename ---` header markers). Set "value" to the full new content. Omit "search" entirely.
+- Use "insert" only when the target file is currently empty (nothing between its --- filename --- header markers). Set "value" to the full new content. Omit "search" entirely.
 - Use "replace" when the file already has content. "search" must be a verbatim, unique substring copied character-for-character from the current file content, including all whitespace and indentation. Never paraphrase or reformat it. "value" is the replacement string.
-- Never use the `--- filename ---` header line as a search string — those are context labels, not file content.
+- Never use the --- filename --- header line as a search string — those are context labels, not file content.
 - To insert new content into an existing file, include enough surrounding context in "search" to uniquely identify the location, then add the new content in "value" alongside that context.
 - To delete content from an existing file, set "value" to the remainder of the "search" block without the deleted portion.
 - You may include multiple edit objects; they are applied in order.
