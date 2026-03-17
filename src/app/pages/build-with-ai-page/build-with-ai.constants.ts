@@ -456,7 +456,7 @@ body {
   font: var(--font-xs);
   letter-spacing: 0.01rem;
   color: var(--cie-text);
-  padding: 0 24px 0 3px;
+  padding: 0 20px 0 3px;
   white-space: nowrap;
 }
 
