@@ -55,7 +55,7 @@ const MODEL_REGISTRY: Record<string, { provider: 'openai' | 'google'; modelId: s
   },
   'google:gemini-3-flash': {
     provider: 'google',
-    modelId: 'gemini-3-flash'
+    modelId: 'gemini-3-flash-preview'
   }
 };
 
