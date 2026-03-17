@@ -25,7 +25,7 @@ Write for a non-technical audience — describe changes in plain English, not in
 
 const MODEL_REGISTRY: Record<string, { provider: 'openai' | 'google'; modelId: string }> = {
   'openai:gpt-5.1': { provider: 'openai', modelId: 'gpt-5.1' },
-  'google:gemini-3-flash': { provider: 'google', modelId: 'gemini-3-flash' }
+  'google:gemini-3-flash': { provider: 'google', modelId: 'gemini-3-flash-preview' }
 };
 
 export default async function handler(req: any, res: any): Promise<void> {

@@ -53,7 +53,7 @@ export const BUILD_WITH_AI_MODELS: BuildWithAiModelOption[] = [
     key: 'google:gemini-3-flash',
     label: 'Gemini 3 Flash',
     provider: 'google',
-    modelId: 'gemini-3-flash',
+    modelId: 'gemini-3-flash-preview',
     contextLimit: 1_000_000
   },
   {
