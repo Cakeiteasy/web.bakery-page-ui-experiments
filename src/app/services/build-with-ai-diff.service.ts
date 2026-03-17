@@ -25,18 +25,27 @@ export class BuildWithAiDiffService {
         throw new Error(`Edit attempted to modify unsupported file: ${edit.file}.`);
       }
 
+      const contentKey = this.toContentKey(edit.file);
+      const currentContent = nextFiles[contentKey];
+
+      if (edit.mode === 'insert') {
+        if (currentContent !== '') {
+          throw new Error(`Insert mode requires an empty file, but ${edit.file} already has content.`);
+        }
+        nextFiles[contentKey] = edit.value;
+        touchedFiles.add(edit.file);
+        continue;
+      }
+
       if (!edit.search) {
         throw new Error(`Search string must not be empty (file: ${edit.file}).`);
       }
-
-      const contentKey = this.toContentKey(edit.file);
-      const currentContent = nextFiles[contentKey];
 
       if (!currentContent.includes(edit.search)) {
         throw new Error(`Search string not found in ${edit.file}.`);
       }
 
-      nextFiles[contentKey] = currentContent.replace(edit.search, edit.replace);
+      nextFiles[contentKey] = currentContent.replace(edit.search, edit.value);
       touchedFiles.add(edit.file);
     }
 

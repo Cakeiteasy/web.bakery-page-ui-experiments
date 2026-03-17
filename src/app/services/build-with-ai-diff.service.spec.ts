@@ -13,7 +13,7 @@ describe('BuildWithAiDiffService', () => {
   it('applies a simple replacement in html', () => {
     const result = service.applyEdits(
       { html: '<h1>Hello</h1>', css: '.a{color:red;}', js: 'console.log("x")' },
-      [{ file: 'content.html', search: '<h1>Hello</h1>', replace: '<h1>Hi</h1>' }]
+      [{ file: 'content.html', search: '<h1>Hello</h1>', value: '<h1>Hi</h1>' }]
     );
 
     expect(result.files.html).toBe('<h1>Hi</h1>');
@@ -25,8 +25,8 @@ describe('BuildWithAiDiffService', () => {
     const result = service.applyEdits(
       { html: '<h1>Hello</h1>', css: '.a{color:red;}', js: '' },
       [
-        { file: 'content.html', search: 'Hello', replace: 'Hi' },
-        { file: 'content.css', search: 'red', replace: 'blue' }
+        { file: 'content.html', search: 'Hello', value: 'Hi' },
+        { file: 'content.css', search: 'red', value: 'blue' }
       ]
     );
 
@@ -41,7 +41,7 @@ describe('BuildWithAiDiffService', () => {
       [{
         file: 'content.html',
         search: '<article>\n  <h3>Title</h3>',
-        replace: '<article>\n  <img src="img.jpg">\n  <h3>Title</h3>'
+        value: '<article>\n  <img src="img.jpg">\n  <h3>Title</h3>'
       }]
     );
 
@@ -52,8 +52,8 @@ describe('BuildWithAiDiffService', () => {
     const result = service.applyEdits(
       { html: 'aaa', css: '', js: '' },
       [
-        { file: 'content.html', search: 'aaa', replace: 'bbb' },
-        { file: 'content.html', search: 'bbb', replace: 'ccc' }
+        { file: 'content.html', search: 'aaa', value: 'bbb' },
+        { file: 'content.html', search: 'bbb', value: 'ccc' }
       ]
     );
 
@@ -70,7 +70,7 @@ describe('BuildWithAiDiffService', () => {
     expect(() =>
       service.applyEdits(
         { html: '', css: '', js: '' },
-        [{ file: 'evil.ts' as any, search: 'x', replace: 'y' }]
+        [{ file: 'evil.ts' as any, search: 'x', value: 'y' }]
       )
     ).toThrowError(/unsupported file/i);
   });
@@ -79,7 +79,7 @@ describe('BuildWithAiDiffService', () => {
     expect(() =>
       service.applyEdits(
         { html: '<p>hello</p>', css: '', js: '' },
-        [{ file: 'content.html', search: 'not-present', replace: 'x' }]
+        [{ file: 'content.html', search: 'not-present', value: 'x' }]
       )
     ).toThrowError(/not found/i);
   });
@@ -88,8 +88,26 @@ describe('BuildWithAiDiffService', () => {
     expect(() =>
       service.applyEdits(
         { html: '<p>x</p>', css: '', js: '' },
-        [{ file: 'content.html', search: '', replace: '<p>y</p>' }]
+        [{ file: 'content.html', search: '', value: '<p>y</p>' }]
       )
     ).toThrowError(/must not be empty/i);
+  });
+
+  it('inserts into an empty file using mode: insert', () => {
+    const result = service.applyEdits(
+      { html: '', css: '', js: '' },
+      [{ file: 'content.html', mode: 'insert', search: '', value: '<h1>Hello</h1>' }]
+    );
+    expect(result.files.html).toBe('<h1>Hello</h1>');
+    expect(result.touchedFiles).toEqual(['content.html']);
+  });
+
+  it('throws when insert mode is used on a non-empty file', () => {
+    expect(() =>
+      service.applyEdits(
+        { html: '<p>existing</p>', css: '', js: '' },
+        [{ file: 'content.html', mode: 'insert', search: '', value: '<h1>Hello</h1>' }]
+      )
+    ).toThrowError(/insert mode requires an empty file/i);
   });
 });

@@ -36,8 +36,9 @@ interface IncomingBody {
 
 interface SearchReplaceEdit {
   file: string;
+  mode?: 'replace' | 'insert';
   search: string;
-  replace: string;
+  value: string;
 }
 
 interface ParsedModelPayload {

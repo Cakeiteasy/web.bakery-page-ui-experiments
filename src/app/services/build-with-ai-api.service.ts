@@ -93,8 +93,9 @@ export class BuildWithAiApiService {
         : 'Applied the requested update.',
       edits: parsed['edits'].map((e: any) => ({
         file: String(e?.file ?? '') as BuildWithAiSearchReplaceEdit['file'],
+        mode: e?.mode === 'insert' ? 'insert' : 'replace',
         search: String(e?.search ?? ''),
-        replace: String(e?.replace ?? '')
+        value: String(e?.value ?? '')
       })),
       warnings: Array.isArray(parsed['warnings'])
         ? parsed['warnings'].map((w: unknown) => String(w))

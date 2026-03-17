@@ -68,8 +68,9 @@ export interface BuildWithAiUsage {
 
 export interface BuildWithAiSearchReplaceEdit {
   file: BuildWithAiEditableFileName;
+  mode?: 'replace' | 'insert';
   search: string;
-  replace: string;
+  value: string;
 }
 
 export interface BuildWithAiApiResponse {

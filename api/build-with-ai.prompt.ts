@@ -34,7 +34,8 @@ Output format:
 {
   "assistantText": "short summary of what changed",
   "edits": [
-    { "file": "content.html", "search": "exact string to find", "replace": "new string" }
+    { "file": "content.html", "mode": "insert", "value": "full new content" },
+    { "file": "content.css", "mode": "replace", "search": "exact string to find", "value": "new string" }
   ],
   "warnings": ["optional warning", "..."]
 }
@@ -42,10 +43,12 @@ Output format:
 - Do not include prose before or after JSON.
 
 Edit rules:
-- Each edit object targets one file and replaces the FIRST occurrence of "search" with "replace".
-- "search" must be a verbatim, unique substring copied character-for-character from the current file content, including all whitespace and indentation. Never paraphrase or reformat it.
-- To insert new content, include enough surrounding context in "search" to uniquely identify the location, then add the new content in "replace" alongside that context.
-- To delete content, set "replace" to the remainder of the "search" block without the deleted portion.
+- Each edit object must include "mode": either "insert" or "replace".
+- Use "insert" only when the target file is currently empty (nothing between its `--- filename ---` header markers). Set "value" to the full new content. Omit "search" entirely.
+- Use "replace" when the file already has content. "search" must be a verbatim, unique substring copied character-for-character from the current file content, including all whitespace and indentation. Never paraphrase or reformat it. "value" is the replacement string.
+- Never use the `--- filename ---` header line as a search string — those are context labels, not file content.
+- To insert new content into an existing file, include enough surrounding context in "search" to uniquely identify the location, then add the new content in "value" alongside that context.
+- To delete content from an existing file, set "value" to the remainder of the "search" block without the deleted portion.
 - You may include multiple edit objects; they are applied in order.
 - If user asks to insert an image and no URL is given, use a descriptive placeholder: https://placehold.co/600x400?text=Image with suitable alt text.
 - Images should be styled responsively: width: 100%; height: auto; border-radius matches surrounding elements.
