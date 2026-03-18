@@ -121,7 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const allowedFields = [
         'slug', 'title', 'seoTitle', 'seoDescription', 'ogTitle', 'ogDescription', 'ogImageUrl',
-        'currentFiles', 'currentModelKey', 'messages', 'patchLogs', 'fontPair', 'accentColor'
+        'currentFiles', 'currentModelKey', 'messages', 'patchLogs', 'fontPair', 'accentColor',
+        'hiddenSections'
       ];
       const patch: Record<string, unknown> = { updatedAt: new Date() };
       for (const key of allowedFields) {

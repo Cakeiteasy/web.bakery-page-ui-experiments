@@ -100,7 +100,7 @@ export class BuildWithAiApiService {
         : 'Applied the requested update.',
       edits: parsed['edits'].map((e: any) => ({
         file: String(e?.file ?? '') as BuildWithAiSearchReplaceEdit['file'],
-        mode: e?.mode === 'insert' ? 'insert' : 'replace',
+        mode: e?.mode === 'insert' ? 'insert' : e?.mode === 'insertAfter' ? 'insertAfter' : 'replace',
         search: String(e?.search ?? ''),
         value: String(e?.value ?? '')
       })),

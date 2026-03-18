@@ -33,13 +33,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       js: ''
     };
 
+    const hiddenSections = (page['hiddenSections'] as string[]) ?? [];
+
     const html = buildPublishedDocument(files, {
       title: (page['seoTitle'] as string) || (page['title'] as string) || 'Cake it Easy',
       description: (page['seoDescription'] as string) || '',
       ogTitle: (page['ogTitle'] as string) || (page['seoTitle'] as string) || (page['title'] as string) || '',
       ogDescription: (page['ogDescription'] as string) || (page['seoDescription'] as string) || '',
       ogImageUrl: (page['ogImageUrl'] as string) || ''
-    });
+    }, hiddenSections);
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');

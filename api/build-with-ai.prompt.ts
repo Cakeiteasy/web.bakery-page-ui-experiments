@@ -27,6 +27,7 @@ Design direction:
 - DO NOT redefine .lp-btn or other existing utilities — extend only if needed.
 - Prefer meaningful sections: hero, cards, feature lists, testimonials, FAQ, metrics, CTA.
 - You may add new CSS classes beyond the design system when useful, but stay consistent with the existing tokens.
+- When overriding .lp-showcase__grid columns, always also set grid-template-rows: auto to prevent phantom empty rows inherited from the base CSS.
 
 Output format:
 - Return JSON only.
@@ -35,7 +36,8 @@ Output format:
   "assistantText": "short summary of what changed",
   "edits": [
     { "file": "content.html", "mode": "insert", "value": "full new content" },
-    { "file": "content.css", "mode": "replace", "search": "exact string to find", "value": "new string" }
+    { "file": "content.css", "mode": "replace", "search": "exact string to find", "value": "new string" },
+    { "file": "content.html", "mode": "insertAfter", "search": "anchor string marking insertion point", "value": "new content to insert after anchor" }
   ],
   "warnings": ["optional warning", "..."]
 }
@@ -43,11 +45,12 @@ Output format:
 - Do not include prose before or after JSON.
 
 Edit rules:
-- Each edit object must include "mode": either "insert" or "replace".
+- Each edit object must include "mode": either "insert", "replace", or "insertAfter".
 - Use "insert" only when the target file is currently empty (nothing between its --- filename --- header markers). Set "value" to the full new content. Omit "search" entirely.
-- Use "replace" when the file already has content. "search" must be a verbatim, unique substring copied character-for-character from the current file content, including all whitespace and indentation. Never paraphrase or reformat it. "value" is the replacement string.
+- Use "replace" when the file already has content and you want to change existing content. "search" must be a verbatim, unique substring copied character-for-character from the current file content, including all whitespace and indentation. Never paraphrase or reformat it. "value" is the replacement string.
+- Use "insertAfter" when adding new content alongside similar existing elements — e.g. a new card in a card grid, a new FAQ entry, a new list item, or any new section that resembles existing ones. Set "search" to a unique anchor string that ends at the insertion point (e.g. the closing tag of the last similar element). Set "value" to the new content to place immediately after that anchor. This leaves the existing element untouched. Never use "replace" for pure insertions of new similar items.
 - Never use the --- filename --- header line as a search string — those are context labels, not file content.
-- To insert new content into an existing file, include enough surrounding context in "search" to uniquely identify the location, then add the new content in "value" alongside that context.
+- To insert new content at a specific location in an existing file, prefer "insertAfter" with an anchor that uniquely identifies where to insert.
 - To delete content from an existing file, set "value" to the remainder of the "search" block without the deleted portion.
 - You may include multiple edit objects; they are applied in order.
 - If user asks to insert an image and no URL is given, use a descriptive placeholder: https://placehold.co/600x400?text=Image with suitable alt text.

@@ -60,6 +60,7 @@ const MOBILE_SIDEBAR_BREAKPOINT = 1100;
 
 export interface SelectedSection {
   selector: string;
+  bwaiId: string;       // data-bwai-id attribute value — unique, stable section identifier
   label: string;
   sectionIndex: number;
   totalSections: number;
@@ -184,7 +185,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
   readonly isSectionHidden = computed(() => {
     const sel = this.selectedSection();
-    return sel ? this.hiddenSections().includes(sel.selector) : false;
+    return sel ? this.hiddenSections().includes(sel.bwaiId) : false;
   });
 
   // Expose window to template for slug preview in SEO modal
@@ -199,12 +200,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.sendToIframe({ type: 'bwai-patch', html: f.html, css: f.css, js: f.js });
     });
 
-    // Live-patch hidden-section CSS when visibility toggles
+    // Live-patch hidden-section visibility when the set changes
     effect(() => {
       const hidden = this.hiddenSections();
       if (!this.iframeReady) return;
-      const hiddenCss = hidden.map((s) => `${s}{display:none!important}`).join('');
-      this.sendToIframe({ type: 'bwai-hidden-css', css: hiddenCss });
+      this.sendToIframe({ type: 'bwai-hidden-css', ids: hidden });
     });
 
     // Auto-scroll chat to bottom when messages change or processing starts
@@ -227,6 +227,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       type?: string;
       message?: string;
       selector?: string;
+      bwaiId?: string;
       label?: string;
       sectionIndex?: number;
       totalSections?: number;
@@ -244,6 +245,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     if (payload.type === 'bwai-selected') {
       this.selectedSection.set({
         selector: payload.selector ?? '',
+        bwaiId: payload.bwaiId ?? '',
         label: payload.label ?? '',
         sectionIndex: payload.sectionIndex ?? 0,
         totalSections: payload.totalSections ?? 1,
@@ -266,9 +268,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     if (payload.type === 'bwai-action') {
       switch (payload.action) {
-        case 'move-up':   this.onMoveSectionUp();   break;
-        case 'move-down': this.onMoveSectionDown();  break;
+        case 'move-up':   this.onMoveSectionUp();    break;
+        case 'move-down': this.onMoveSectionDown();   break;
         case 'hide':      this.onToggleHideSection(); break;
+        case 'remove':    this.onRemoveSection();     break;
         case 'insert':    this.showInsertMenu.set(true); break;
         case 'select':    this.selectionModeActive.set(true); break;
       }
@@ -323,8 +326,13 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.pages.set(allPages);
 
       const rawFiles = page.currentFiles ?? { html: '', css: '', js: '' };
-      const files = { ...rawFiles, html: this.normalizeHtml(rawFiles.html) };
+      const normalized = this.normalizeHtml(rawFiles.html);
+      const { html: htmlWithIds, changed: idsAdded } = this.ensureSectionIds(normalized);
+      const files = { ...rawFiles, html: htmlWithIds };
       this.files.set(files);
+      if (idsAdded) {
+        void this.persistToMongo({ currentFiles: files });
+      }
       this.messages.set(page.messages?.length ? page.messages : [
         {
           id: this.createId('assistant'),
@@ -345,10 +353,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       }
 
       this.selectedSection.set(null);
-      this.hiddenSections.set([]);
+      this.hiddenSections.set(page.hiddenSections ?? []);
       this.showInsertMenu.set(false);
 
-      this.activeSrcdoc.set(this.buildPreviewDocument(this.files(), []));
+      this.activeSrcdoc.set(this.buildPreviewDocument(this.files(), page.hiddenSections ?? []));
 
       // Auto-send if navigated here with a prompt (e.g. from "AI build" new-page flow)
       const state = window.history.state as Record<string, unknown> | null;
@@ -614,7 +622,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     if (!page) return;
     try {
       const restoredFiles = await this.bwaiPageService.restoreVersionAsync(page.id, version.id);
-      const files = { ...restoredFiles, html: this.normalizeHtml(restoredFiles.html) };
+      const { html: restoredHtmlWithIds } = this.ensureSectionIds(this.normalizeHtml(restoredFiles.html));
+      const files = { ...restoredFiles, html: restoredHtmlWithIds };
       this.files.set(files);
       this.currentPage.update((p) => p ? { ...p, currentFiles: files } : p);
     } catch {
@@ -822,12 +831,22 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
   onToggleHideSection(): void {
     const sel = this.selectedSection();
-    if (!sel) return;
+    if (!sel || !sel.bwaiId) return;
 
-    const isHidden = this.hiddenSections().includes(sel.selector);
+    const isHidden = this.hiddenSections().includes(sel.bwaiId);
     this.hiddenSections.update((hs) =>
-      isHidden ? hs.filter((s) => s !== sel.selector) : [...hs, sel.selector]
+      isHidden ? hs.filter((s) => s !== sel.bwaiId) : [...hs, sel.bwaiId]
     );
+    void this.persistToMongo({ hiddenSections: this.hiddenSections() });
+  }
+
+  onRemoveSection(): void {
+    const sel = this.selectedSection();
+    if (!sel) return;
+    if (!confirm(`Remove the "${sel.label}" section? This cannot be undone.`)) return;
+    this.removeHtmlSection(sel.sectionIndex);
+    this.selectedSection.set(null);
+    void this.persistToMongo({ currentFiles: this.files() });
   }
 
   // ── Insert section ─────────────────────────────
@@ -886,7 +905,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.activeError.set(null);
     this.pendingAttachments.set([]);
     this.selectedSection.set(null);
-    this.hiddenSections.set([]);
     this.showInsertMenu.set(false);
 
     if (this.selectionModeActive()) {
@@ -1038,7 +1056,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         return;
       }
 
-      this.files.set({ ...diffResult.files, html: this.normalizeHtml(diffResult.files.html) });
+      const patchedHtml = this.normalizeHtml(diffResult.files.html);
+      const { html: patchedHtmlWithIds } = this.ensureSectionIds(patchedHtml);
+      this.files.set({ ...diffResult.files, html: patchedHtmlWithIds });
       this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
 
       const warningsText = response.warnings.length ? `\n\nWarnings:\n- ${response.warnings.join('\n- ')}` : '';
@@ -1139,6 +1159,30 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.files.update((f) => ({ ...f, html: container.innerHTML }));
   }
 
+  private removeHtmlSection(index: number): void {
+    const container = document.createElement('div');
+    container.innerHTML = this.normalizeHtml(this.files().html);
+    const children = Array.from(container.children);
+    if (index >= children.length) return;
+    children[index].remove();
+    this.files.update((f) => ({ ...f, html: container.innerHTML }));
+  }
+
+  /** Ensures every top-level section has a unique data-bwai-id attribute.
+   *  Returns the (possibly modified) HTML and whether any IDs were added. */
+  private ensureSectionIds(html: string): { html: string; changed: boolean } {
+    const container = document.createElement('div');
+    container.innerHTML = this.normalizeHtml(html);
+    let changed = false;
+    Array.from(container.children).forEach((child) => {
+      if (!child.getAttribute('data-bwai-id')) {
+        child.setAttribute('data-bwai-id', 'bwai-' + Math.random().toString(36).slice(2, 10));
+        changed = true;
+      }
+    });
+    return { html: container.innerHTML, changed };
+  }
+
   private async appendAttachments(fileList: FileList | File[]): Promise<void> {
     const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'));
     if (!files.length) {
@@ -1184,6 +1228,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     messages?: BuildWithAiChatMessage[];
     patchLogs?: BuildWithAiPatchLogEntry[];
     currentModelKey?: string;
+    hiddenSections?: string[];
   }): Promise<void> {
     const page = this.currentPage();
     if (!page) return;
@@ -1197,8 +1242,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private buildPreviewDocument(files: BuildWithAiEditableFiles, hiddenSections: string[] = []): string {
     const safeCss = files.css.replace(/<\/style>/gi, '<\\/style>');
     const safeJs = files.js.replace(/<\/script>/gi, '<\\/script>');
+    // Hidden sections use the bwai-hidden class (applied via postMessage in the live builder).
+    // On initial srcdoc load we apply via data attribute selector so sections are already collapsed.
     const hiddenCss = hiddenSections.length
-      ? hiddenSections.map((sel) => `${sel}{display:none!important}`).join('')
+      ? hiddenSections.map((id) => `[data-bwai-id="${id}"]`).join(',') + '{opacity:0.25!important;max-height:50px!important;overflow:hidden!important;}'
       : '';
 
     return `<!doctype html>
@@ -1285,6 +1332,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var bwaiEls = clone.querySelectorAll('.bwai-toolbar');
           for (var i = 0; i < bwaiEls.length; i++) bwaiEls[i].remove();
           clone.className = (clone.className || '').replace(/\\bbwai-\\S*/g, '').trim();
+          if (clone.className === '') clone.removeAttribute('class');
           return clone.outerHTML;
         }
 
@@ -1308,7 +1356,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var rawClasses = (el.className || '').replace(/bwai-\\S*/g, '').trim().split(/\\s+/);
           var firstClass = rawClasses.find(function (c) { return c.length > 0; }) || '';
           var selector = firstClass ? ('.' + firstClass) : ('section:nth-child(' + (idx + 1) + ')');
-          return { idx: idx, total: siblings.length, selector: selector };
+          var bwaiId = el.getAttribute('data-bwai-id') || '';
+          return { idx: idx, total: siblings.length, selector: selector, bwaiId: bwaiId };
         }
 
         /* ── toolbar ── */
@@ -1324,6 +1373,17 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           toolbarOrigPos = '';
         }
 
+        /* ── SVG icon strings ── */
+        var IC_UP     = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>';
+        var IC_DOWN   = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>';
+        var IC_HIDE   = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+        var IC_SHOW   = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+        var IC_TRASH  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+        var IC_INSERT = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+        var IC_SELECT = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-7 1-4 7z"/></svg>';
+        var IC_COPY   = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        var IC_CHECK  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
         function buildToolbar(el, idx, total) {
           removeToolbar();
 
@@ -1335,38 +1395,80 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var t = document.createElement('div');
           t.className = 'bwai-toolbar';
 
-          function btn(action, label, disabled) {
+          function grp() {
+            var g = document.createElement('div');
+            g.className = 'bwai-group';
+            return g;
+          }
+          function btn(action, icon, label, disabled) {
             var b = document.createElement('button');
             b.setAttribute('data-bwai', action);
-            b.textContent = label;
+            b.innerHTML = icon + '<span>' + label + '</span>';
             if (disabled) b.disabled = true;
             return b;
           }
 
-          t.appendChild(btn('move-up',   '↑ Up',      idx === 0));
-          t.appendChild(btn('move-down', '↓ Down',    idx === total - 1));
-          t.appendChild(btn('hide',      'Hide',      false));
-          t.appendChild(btn('insert',    '+ Insert',  false));
-          t.appendChild(btn('select',    'Select',    false));
+          var isHidden = el.classList.contains('bwai-hidden');
+
+          // Group 1: Move
+          var g1 = grp();
+          g1.appendChild(btn('move-up',   IC_UP,     'Up',    idx === 0));
+          g1.appendChild(btn('move-down', IC_DOWN,   'Down',  idx === total - 1));
+          t.appendChild(g1);
+
+          // Group 2: Visibility
+          var g2 = grp();
+          g2.appendChild(btn('hide', isHidden ? IC_SHOW : IC_HIDE, isHidden ? 'Show' : 'Hide', false));
+          t.appendChild(g2);
+
+          // Group 3: Remove
+          var g3 = grp();
+          var removeBtn = btn('remove', IC_TRASH, 'Remove', false);
+          removeBtn.classList.add('bwai-btn--danger');
+          g3.appendChild(removeBtn);
+          t.appendChild(g3);
+
+          // Group 4: Insert after
+          var g4 = grp();
+          g4.appendChild(btn('insert', IC_INSERT, 'Insert after', false));
+          t.appendChild(g4);
+
+          // Group 5: Select + Copy ID
+          var g5 = grp();
+          g5.appendChild(btn('select',  IC_SELECT, 'Select',  false));
+          g5.appendChild(btn('copy-id', IC_COPY,   'Copy ID', false));
+          t.appendChild(g5);
 
           t.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('[data-bwai]') : null;
             if (!b || b.disabled) return;
             e.stopPropagation();
             e.preventDefault();
+            var action = b.getAttribute('data-bwai');
+
+            // Copy ID is handled locally — no postMessage needed
+            if (action === 'copy-id') {
+              var secId = toolbarSection ? (toolbarSection.getAttribute('data-bwai-id') || '') : '';
+              if (navigator.clipboard) { navigator.clipboard.writeText(secId).catch(function() {}); }
+              b.innerHTML = IC_CHECK + '<span>Copied!</span>';
+              setTimeout(function() { b.innerHTML = IC_COPY + '<span>Copy ID</span>'; }, 1500);
+              return;
+            }
+
             var m2 = getSectionMeta(toolbarSection);
             var lbl = m2.selector.replace(/^\\.lp-/, '').replace(/-/g, ' ');
             lbl = lbl.charAt(0).toUpperCase() + lbl.slice(1);
-            // Update Angular's selectedSection so move/hide handlers target the right section
+            // Update Angular's selectedSection so move/hide/remove handlers target the right section
             parent.postMessage({
               type: 'bwai-selected',
               selector: m2.selector,
+              bwaiId: m2.bwaiId,
               label: lbl,
               sectionIndex: m2.idx,
               totalSections: m2.total,
               outerHtml: getCleanOuterHtml(toolbarSection)
             }, '*');
-            parent.postMessage({ type: 'bwai-action', action: b.getAttribute('data-bwai') }, '*');
+            parent.postMessage({ type: 'bwai-action', action: action }, '*');
           });
 
           el.insertBefore(t, el.firstChild);
@@ -1420,18 +1522,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           }
 
           if (d.type === 'bwai-hidden-css') {
-            var hiddenEl = document.getElementById('BuildWithAiHiddenSections');
-            if (d.css) {
-              if (hiddenEl) {
-                hiddenEl.textContent = d.css;
-              } else {
-                var newHidden = document.createElement('style');
-                newHidden.id = 'BuildWithAiHiddenSections';
-                newHidden.textContent = d.css;
-                document.head.appendChild(newHidden);
+            // Remove bwai-hidden class from all currently hidden sections
+            var prevHidden = document.querySelectorAll('.bwai-hidden');
+            for (var hi = 0; hi < prevHidden.length; hi++) prevHidden[hi].classList.remove('bwai-hidden');
+            // Apply to new set by data-bwai-id
+            if (d.ids && d.ids.length) {
+              for (var hj = 0; hj < d.ids.length; hj++) {
+                var hel = document.querySelector('[data-bwai-id="' + d.ids[hj] + '"]');
+                if (hel) hel.classList.add('bwai-hidden');
               }
-            } else if (hiddenEl) {
-              hiddenEl.remove();
             }
           }
 
@@ -1485,6 +1584,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           parent.postMessage({
             type: 'bwai-selected',
             selector: m.selector,
+            bwaiId: m.bwaiId,
             label: label,
             sectionIndex: m.idx,
             totalSections: m.total,
@@ -1497,10 +1597,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         style.textContent = [
           '.bwai-hover{outline:2px dashed #ff3399!important;outline-offset:-2px;cursor:crosshair!important}',
           '.bwai-selected{outline:2px solid #ff3399!important;outline-offset:-2px;background-color:rgba(255,51,153,0.04)!important}',
-          '.bwai-toolbar{position:absolute;top:10px;left:10px;z-index:99999;display:flex;gap:4px;background:#fff;border:1px solid rgba(0,0,0,0.1);border-radius:8px;padding:4px 6px;box-shadow:0 2px 12px rgba(0,0,0,0.14);pointer-events:all}',
-          '.bwai-toolbar button{border:1px solid #e5e5e5;background:#fff;padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;color:#555;font-family:-apple-system,sans-serif;white-space:nowrap;transition:background .1s,color .1s,border-color .1s}',
-          '.bwai-toolbar button:hover:not(:disabled){background:#fff0f7;border-color:#ff3399;color:#ff3399}',
-          '.bwai-toolbar button:disabled{opacity:.3;cursor:not-allowed}'
+          '.bwai-hidden{opacity:0.25!important;max-height:50px!important;overflow:hidden!important}',
+          '.bwai-toolbar{position:absolute;top:10px;left:10px;z-index:99999;display:flex;gap:5px;pointer-events:all}',
+          '.bwai-group{display:flex;background:#fff;border:1px solid rgba(0,0,0,0.1);border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.12);overflow:hidden}',
+          '.bwai-toolbar button{border:none;border-right:1px solid #f0f0f0;background:#fff;padding:5px 9px;font-size:11px;font-weight:600;cursor:pointer;color:#555;font-family:-apple-system,sans-serif;white-space:nowrap;display:flex;align-items:center;gap:4px;transition:background .1s,color .1s}',
+          '.bwai-toolbar button:last-child{border-right:none}',
+          '.bwai-toolbar button:hover:not(:disabled){background:#fff0f7;color:#ff3399}',
+          '.bwai-toolbar button:disabled{opacity:.3;cursor:not-allowed}',
+          '.bwai-btn--danger:hover:not(:disabled){background:#fff5f5!important;color:#e53e3e!important}'
         ].join('');
         document.head.appendChild(style);
       })();

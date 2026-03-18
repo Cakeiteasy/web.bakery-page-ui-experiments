@@ -37,6 +37,19 @@ export class BuildWithAiDiffService {
         continue;
       }
 
+      if (edit.mode === 'insertAfter') {
+        if (!edit.search) {
+          throw new Error(`Search string must not be empty for insertAfter mode (file: ${edit.file}).`);
+        }
+        if (!currentContent.includes(edit.search)) {
+          throw new Error(`Search string not found in ${edit.file}.`);
+        }
+        const anchorEnd = currentContent.indexOf(edit.search) + edit.search.length;
+        nextFiles[contentKey] = currentContent.slice(0, anchorEnd) + edit.value + currentContent.slice(anchorEnd);
+        touchedFiles.add(edit.file);
+        continue;
+      }
+
       if (!edit.search) {
         throw new Error(`Search string must not be empty (file: ${edit.file}).`);
       }

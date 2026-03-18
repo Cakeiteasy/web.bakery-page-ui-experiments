@@ -1439,7 +1439,7 @@ export const FOOTER_HTML = `<footer id="PageFooter" class="footer">
  * Builds a standalone, publishable HTML document for a given page.
  * Does NOT include any BWAI editor scripts — this is the clean public version.
  */
-export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}): string {
+export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}, hiddenSections: string[] = []): string {
   const title = seo.title ?? 'Cake it Easy';
   const description = seo.description ?? '';
   const ogTitle = seo.ogTitle ?? title;
@@ -1448,6 +1448,9 @@ export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}):
 
   const safeCss = files.css.replace(/<\/style>/gi, '<\\/style>');
   const safeJs = files.js.replace(/<\/script>/gi, '<\\/script>');
+  const hiddenCss = hiddenSections.length
+    ? hiddenSections.map((id) => `[data-bwai-id="${id}"]{display:none!important}`).join('')
+    : '';
 
   const metaTags = [
     description ? `<meta name="description" content="${esc(description)}" />` : '',
@@ -1468,7 +1471,7 @@ export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}):
     ${metaTags}
     <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap" rel="stylesheet" />
     <style>${STATIC_SHELL_CSS}</style>
-    <style id="BuildWithAiContentStyle">${safeCss}</style>
+    <style id="BuildWithAiContentStyle">${safeCss}</style>${hiddenCss ? `\n    <style>${hiddenCss}</style>` : ''}
   </head>
   <body>
     ${HEADER_HTML}

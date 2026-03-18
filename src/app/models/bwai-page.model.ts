@@ -19,6 +19,7 @@ export interface BwaiPage extends BwaiPageSummary {
   patchLogs: BuildWithAiPatchLogEntry[];
   fontPair?: string;
   accentColor?: string;
+  hiddenSections?: string[];    // data-bwai-id values of hidden sections
   createdAt: number;
 }
 
@@ -54,4 +55,5 @@ export interface BwaiPageUpdatePayload {
   patchLogs?: BuildWithAiPatchLogEntry[];
   fontPair?: string;
   accentColor?: string;
+  hiddenSections?: string[];
 }

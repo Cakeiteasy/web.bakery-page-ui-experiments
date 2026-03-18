@@ -110,4 +110,48 @@ describe('BuildWithAiDiffService', () => {
       )
     ).toThrowError(/insert mode requires an empty file/i);
   });
+
+  it('insertAfter inserts value immediately after the anchor string', () => {
+    const result = service.applyEdits(
+      { html: '<ul><li>Item 1</li><li>Item 2</li></ul>', css: '', js: '' },
+      [{ file: 'content.html', mode: 'insertAfter', search: '<li>Item 2</li>', value: '<li>Item 3</li>' }]
+    );
+    expect(result.files.html).toBe('<ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>');
+    expect(result.touchedFiles).toEqual(['content.html']);
+  });
+
+  it('insertAfter inserts after first occurrence when anchor appears multiple times', () => {
+    const result = service.applyEdits(
+      { html: '<div class="card">A</div><div class="card">B</div>', css: '', js: '' },
+      [{ file: 'content.html', mode: 'insertAfter', search: '<div class="card">A</div>', value: '<div class="card">NEW</div>' }]
+    );
+    expect(result.files.html).toBe('<div class="card">A</div><div class="card">NEW</div><div class="card">B</div>');
+  });
+
+  it('insertAfter does not modify the anchor content', () => {
+    const html = '<section><h2>Title</h2></section>';
+    const result = service.applyEdits(
+      { html, css: '', js: '' },
+      [{ file: 'content.html', mode: 'insertAfter', search: '</section>', value: '\n<section><h2>New</h2></section>' }]
+    );
+    expect(result.files.html).toBe('<section><h2>Title</h2></section>\n<section><h2>New</h2></section>');
+  });
+
+  it('throws when insertAfter search string is empty', () => {
+    expect(() =>
+      service.applyEdits(
+        { html: '<p>x</p>', css: '', js: '' },
+        [{ file: 'content.html', mode: 'insertAfter', search: '', value: '<p>y</p>' }]
+      )
+    ).toThrowError(/must not be empty/i);
+  });
+
+  it('throws when insertAfter search string is not found', () => {
+    expect(() =>
+      service.applyEdits(
+        { html: '<p>hello</p>', css: '', js: '' },
+        [{ file: 'content.html', mode: 'insertAfter', search: '<p>missing</p>', value: '<p>new</p>' }]
+      )
+    ).toThrowError(/not found/i);
+  });
 });
