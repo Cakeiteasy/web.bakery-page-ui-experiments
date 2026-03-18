@@ -32,6 +32,10 @@
       "dest": "/api/upload-image.ts"
     },
     {
+      "src": "/api/unsplash-search",
+      "dest": "/api/unsplash-search.ts"
+    },
+    {
       "src": "/(.*)",
       "dest": "/api/page-renderer.ts"
     }

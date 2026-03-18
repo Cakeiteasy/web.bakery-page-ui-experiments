@@ -15,6 +15,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { mixHexColors, normalizeHexColor } from '../../utils/color-contrast.util';
 
 import {
   BuildWithAiAttachment,
@@ -46,6 +47,10 @@ import {
   BWAI_SYSTEM_PROMPT_LS_KEY,
   BWAI_DEMO_KEY_LS_KEY
 } from './bwai-generation-settings/bwai-generation-settings.component';
+import {
+  BwaiImagePickerModalComponent,
+  UnsplashPickerSelection
+} from './bwai-image-picker-modal/bwai-image-picker-modal.component';
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'build-with-ai-sidebar-width';
 const SIDEBAR_WIDTH_DEFAULT = 360;
@@ -75,7 +80,7 @@ const INSERT_SECTION_TYPES = [
 @Component({
   selector: 'app-build-with-ai-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, BwaiSeoModalComponent, BwaiNewPageDialogComponent, BwaiGenerationSettingsComponent],
+  imports: [CommonModule, FormsModule, BwaiSeoModalComponent, BwaiNewPageDialogComponent, BwaiGenerationSettingsComponent, BwaiImagePickerModalComponent],
   templateUrl: './build-with-ai-page.component.html',
   styleUrl: './build-with-ai-page.component.scss'
 })
@@ -126,6 +131,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   readonly showSeoModal = signal<boolean>(false);
   readonly showNewPageDialog = signal<boolean>(false);
   readonly showGenerationSettings = signal<boolean>(false);
+  readonly showImagePicker = signal<boolean>(false);
   readonly activeTab = signal<'chat' | 'versions'>('chat');
   readonly copiedToast = signal<boolean>(false);
   readonly uploadingCount = signal<number>(0);
@@ -247,7 +253,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
 
     if (payload.type === 'bwai-inline-edit-save') {
-      const newHtml = String((payload as any).html ?? '');
+      const newHtml = this.normalizeHtml(String((payload as any).html ?? ''));
       const updated = { ...this.files(), html: newHtml };
       const validation = this.syntaxValidator.validate(updated);
       if (validation.valid) {
@@ -316,7 +322,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.currentPage.set(page);
       this.pages.set(allPages);
 
-      const files = page.currentFiles ?? { html: '', css: '', js: '' };
+      const rawFiles = page.currentFiles ?? { html: '', css: '', js: '' };
+      const files = { ...rawFiles, html: this.normalizeHtml(rawFiles.html) };
       this.files.set(files);
       this.messages.set(page.messages?.length ? page.messages : [
         {
@@ -493,11 +500,27 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
 
     if (accentColor) {
-      if (/--lp-rose:/.test(css)) {
-        css = css.replace(/--lp-rose:\s*[^;]+;/, `--lp-rose: ${accentColor};`);
-      } else {
-        // Inject override at top of :root block if present, else at top of file
-        css = css.replace(':root {', `:root {\n  --lp-rose: ${accentColor};`);
+      const primary = normalizeHexColor(accentColor, '#ff3399');
+      const mid   = mixHexColors(primary, '#ffffff', 0.68);
+      const soft  = mixHexColors(primary, '#ffffff', 0.17);
+      const faint = mixHexColors(primary, '#ffffff', 0.07);
+      const r = parseInt(primary.slice(1, 3), 16);
+      const g = parseInt(primary.slice(3, 5), 16);
+      const b = parseInt(primary.slice(5, 7), 16);
+      const shadow = `0 8px 32px rgba(${r},${g},${b},.24)`;
+
+      const replacements: [RegExp, string][] = [
+        [/--lp-primary:\s*[^;]+;/, `--lp-primary: ${primary};`],
+        [/--lp-primary-mid:\s*[^;]+;/, `--lp-primary-mid: ${mid};`],
+        [/--lp-primary-soft:\s*[^;]+;/, `--lp-primary-soft: ${soft};`],
+        [/--lp-primary-faint:\s*[^;]+;/, `--lp-primary-faint: ${faint};`],
+        [/--lp-shadow-primary:\s*[^;]+;/, `--lp-shadow-primary: ${shadow};`],
+      ];
+
+      for (const [pattern, replacement] of replacements) {
+        if (pattern.test(css)) {
+          css = css.replace(pattern, replacement);
+        }
       }
     }
 
@@ -590,7 +613,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     const page = this.currentPage();
     if (!page) return;
     try {
-      const files = await this.bwaiPageService.restoreVersionAsync(page.id, version.id);
+      const restoredFiles = await this.bwaiPageService.restoreVersionAsync(page.id, version.id);
+      const files = { ...restoredFiles, html: this.normalizeHtml(restoredFiles.html) };
       this.files.set(files);
       this.currentPage.update((p) => p ? { ...p, currentFiles: files } : p);
     } catch {
@@ -704,7 +728,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   @HostListener('window:keydown', ['$event'])
   onWindowKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
-      if (this.showSeoModal()) {
+      if (this.showImagePicker()) {
+        this.showImagePicker.set(false);
+      } else if (this.showSeoModal()) {
         this.showSeoModal.set(false);
       } else if (this.showNewPageDialog()) {
         this.showNewPageDialog.set(false);
@@ -893,6 +919,30 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     input.value = '';
   }
 
+  async onImagePickerConfirmed(selections: UnsplashPickerSelection[]): Promise<void> {
+    this.showImagePicker.set(false);
+
+    const unsplashAttachments: BuildWithAiAttachment[] = selections
+      .filter((s) => s.source === 'unsplash')
+      .map((s) => ({
+        id: this.createId('att'),
+        name: s.description || 'Unsplash image',
+        mimeType: 'image/jpeg',
+        sizeBytes: 0,
+        kind: 'url' as const,
+        url: s.url
+      }));
+
+    if (unsplashAttachments.length) {
+      this.pendingAttachments.update((prev) => [...prev, ...unsplashAttachments]);
+    }
+
+    const filePicks = selections.filter((s) => s.source === 'upload' && s.file).map((s) => s.file!);
+    if (filePicks.length) {
+      await this.appendAttachments(filePicks);
+    }
+  }
+
   onDrop(event: DragEvent): void {
     event.preventDefault();
     this.dragActive.set(false);
@@ -988,7 +1038,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         return;
       }
 
-      this.files.set(diffResult.files);
+      this.files.set({ ...diffResult.files, html: this.normalizeHtml(diffResult.files.html) });
       this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
 
       const warningsText = response.warnings.length ? `\n\nWarnings:\n- ${response.warnings.join('\n- ')}` : '';
@@ -1061,9 +1111,18 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     ];
   }
 
+  private normalizeHtml(html: string): string {
+    const container = document.createElement('div');
+    container.innerHTML = html.trim();
+    if (container.children.length === 1 && container.children[0].tagName === 'MAIN') {
+      return (container.children[0] as HTMLElement).innerHTML;
+    }
+    return html;
+  }
+
   private swapHtmlSections(indexA: number, indexB: number): void {
     const container = document.createElement('div');
-    container.innerHTML = this.files().html;
+    container.innerHTML = this.normalizeHtml(this.files().html);
     const children = Array.from(container.children);
 
     if (indexA >= children.length || indexB >= children.length) return;
@@ -1080,7 +1139,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.files.update((f) => ({ ...f, html: container.innerHTML }));
   }
 
-  private async appendAttachments(fileList: FileList): Promise<void> {
+  private async appendAttachments(fileList: FileList | File[]): Promise<void> {
     const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'));
     if (!files.length) {
       this.setError('validation', 'Only image files are supported for drag and drop.');

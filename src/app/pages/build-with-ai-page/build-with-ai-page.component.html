@@ -179,7 +179,7 @@
             <ul class="message__attachments" *ngIf="message.attachments.length">
               <li *ngFor="let attachment of message.attachments">
                 <span>{{ attachment.name }}</span>
-                <small>{{ (attachment.sizeBytes / 1024) | number: '1.0-0' }} KB</small>
+                <small *ngIf="attachment.sizeBytes > 0">{{ (attachment.sizeBytes / 1024) | number: '1.0-0' }} KB</small>
               </li>
             </ul>
           </article>
@@ -261,15 +261,21 @@
 
           <div class="composer__actions">
             <div class="composer__actions-left">
-              <label class="upload-button" title="Attach image" [class.upload-button--busy]="uploadingCount() > 0">
+              <button
+                type="button"
+                class="upload-button"
+                title="Select or upload images"
+                [class.upload-button--busy]="uploadingCount() > 0"
+                [disabled]="uploadingCount() > 0"
+                (click)="showImagePicker.set(true)"
+              >
                 <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M2 12l3.5-4.5 2.5 3L11 7l3 5H2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
                   <circle cx="5.5" cy="5.5" r="1.2" stroke="currentColor" stroke-width="1.3"/>
                   <rect x="0.7" y="0.7" width="14.6" height="14.6" rx="2.3" stroke="currentColor" stroke-width="1.3"/>
                 </svg>
                 <span>{{ uploadingCount() > 0 ? 'Uploading…' : 'Image' }}</span>
-                <input type="file" accept="image/*" multiple [disabled]="uploadingCount() > 0" (change)="onFileInputChange($event)" />
-              </label>
+              </button>
 
               <label class="model-select" [title]="selectedModel().label">
                 <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -286,18 +292,6 @@
                 </select>
               </label>
             </div>
-
-            <button
-              *ngIf="files().html.trim()"
-              type="button"
-              class="review-btn"
-              [disabled]="reviewingPatchId() !== null || processing()"
-              (click)="onVisualReview('latest')"
-            >
-              <span *ngIf="reviewingPatchId() === null">👁 Review</span>
-              <span *ngIf="reviewingPatchId() !== null">Reviewing…</span>
-            </button>
-
             <button type="submit" class="send-button" [disabled]="!canSend()">
               Apply
               <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
@@ -371,3 +365,10 @@
   (saved)="onSaveGenerationSettings($event)"
   (closed)="showGenerationSettings.set(false)"
 ></app-bwai-generation-settings>
+
+<!-- Image picker modal -->
+<app-bwai-image-picker-modal
+  *ngIf="showImagePicker()"
+  (confirmed)="onImagePickerConfirmed($event)"
+  (closed)="showImagePicker.set(false)"
+></app-bwai-image-picker-modal>

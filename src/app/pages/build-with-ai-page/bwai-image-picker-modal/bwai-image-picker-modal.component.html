@@ -1,0 +1,148 @@
+<div class="modal-backdrop" (click)="onBackdropClick($event)">
+  <div class="modal">
+
+    <header class="modal__header">
+      <h2>Select Images</h2>
+      <button type="button" class="modal__close" (click)="onClose()" aria-label="Close">✕</button>
+    </header>
+
+    <div class="modal__tabs">
+      <button
+        type="button"
+        class="tab-btn"
+        [class.tab-btn--active]="activeTab() === 'search'"
+        (click)="activeTab.set('search')"
+      >Search Unsplash</button>
+      <button
+        type="button"
+        class="tab-btn"
+        [class.tab-btn--active]="activeTab() === 'upload'"
+        (click)="activeTab.set('upload')"
+      >Upload</button>
+    </div>
+
+    <div class="modal__body">
+
+      <!-- SEARCH TAB -->
+      <div *ngIf="activeTab() === 'search'" class="tab-pane">
+        <input
+          type="text"
+          class="search-input"
+          placeholder="Search for photos…"
+          [ngModel]="searchQuery()"
+          (ngModelChange)="onSearchQueryChange($event)"
+          autocomplete="off"
+        />
+
+        <!-- Recent images (shown when search is empty) -->
+        <ng-container *ngIf="!searchQuery()">
+          <div *ngIf="recentImages().length" class="results-section">
+            <p class="section-label">Recent</p>
+            <div class="image-grid">
+              <div
+                class="image-card"
+                *ngFor="let photo of recentImages()"
+                [class.image-card--selected]="isSelected(photo.unsplashId)"
+                (click)="toggleRecentImage(photo)"
+              >
+                <img [src]="photo.thumbUrl" [alt]="photo.description" loading="lazy" />
+                <div class="card__check" *ngIf="isSelected(photo.unsplashId)">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7l3 3 6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </div>
+                <a class="card__credit" [href]="photo.photographerUrl" target="_blank" rel="noopener" (click)="$event.stopPropagation()">{{ photo.photographerName }}</a>
+              </div>
+            </div>
+          </div>
+
+          <div *ngIf="!recentImages().length" class="empty-state">
+            <p>Search for photos on Unsplash or upload your own images.</p>
+          </div>
+        </ng-container>
+
+        <!-- Searching indicator -->
+        <div *ngIf="searching() && searchPage() === 1" class="searching-state">
+          <div class="search-skeleton" *ngFor="let i of [1,2,3,4,5,6]"></div>
+        </div>
+
+        <!-- Error state -->
+        <div *ngIf="searchError()" class="error-state">
+          <p>{{ searchError() }}</p>
+        </div>
+
+        <!-- Search results -->
+        <ng-container *ngIf="searchQuery() && !searchError()">
+          <div *ngIf="searchResults().length" class="image-grid">
+            <div
+              class="image-card"
+              *ngFor="let photo of searchResults()"
+              [class.image-card--selected]="isSelected(photo.id)"
+              (click)="toggleSearchResult(photo)"
+            >
+              <img [src]="photo.thumbUrl" [alt]="photo.description" loading="lazy" />
+              <div class="card__check" *ngIf="isSelected(photo.id)">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7l3 3 6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <a class="card__credit" [href]="photo.photographerUrl" target="_blank" rel="noopener" (click)="$event.stopPropagation()">{{ photo.photographerName }}</a>
+            </div>
+          </div>
+
+          <div *ngIf="!searching() && !searchResults().length" class="empty-state">
+            <p>No photos found for "{{ searchQuery() }}"</p>
+          </div>
+
+          <div class="load-more-wrap" *ngIf="hasMorePages()">
+            <button type="button" class="btn-ghost load-more-btn" [disabled]="searching()" (click)="onLoadMore()">
+              {{ searching() ? 'Loading…' : 'Load more' }}
+            </button>
+          </div>
+        </ng-container>
+      </div>
+
+      <!-- UPLOAD TAB -->
+      <div *ngIf="activeTab() === 'upload'" class="tab-pane">
+        <div
+          class="upload-zone"
+          [class.upload-zone--active]="dragActive()"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave($event)"
+          (drop)="onFileDrop($event)"
+          (click)="fileInput.click()"
+        >
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="2" y="2" width="20" height="20" rx="3" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M2 15l5-5.5 4 4.5 4-5.5 5 6.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            <circle cx="7.5" cy="8" r="1.5" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+          <p>Drop images here or <span class="upload-zone__link">browse files</span></p>
+          <p class="upload-zone__hint">PNG, JPG, WebP, GIF</p>
+          <input #fileInput type="file" accept="image/*" multiple hidden (change)="onFileInputChange($event)" />
+        </div>
+
+        <div *ngIf="pendingFileEntries().length" class="file-previews">
+          <div class="file-preview-card" *ngFor="let entry of pendingFileEntries()">
+            <img [src]="entry.previewUrl" [alt]="entry.file.name" />
+            <span class="file-preview-card__name" [title]="entry.file.name">{{ entry.file.name }}</span>
+            <button type="button" class="file-preview-card__remove" (click)="removePendingFile(entry)" aria-label="Remove">✕</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <footer class="modal__footer">
+      <span class="footer__count" *ngIf="selectedImages().length">
+        {{ selectedImages().length }} image{{ selectedImages().length !== 1 ? 's' : '' }} selected
+      </span>
+      <button type="button" class="btn-ghost" (click)="onClose()">Cancel</button>
+      <button
+        type="button"
+        class="btn-primary"
+        [disabled]="!selectedImages().length"
+        (click)="onConfirm()"
+      >
+        {{ selectedImages().length ? 'Add ' + selectedImages().length + (selectedImages().length !== 1 ? ' images' : ' image') : 'Add Images' }}
+      </button>
+    </footer>
+
+  </div>
+</div>

@@ -1,6 +1,7 @@
 import { streamText, CoreMessage } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
+import sharp from 'sharp';
 
 import { COMPONENT_LIBRARY_PROMPT, SYSTEM_PROMPT } from './build-with-ai.prompt.js';
 
@@ -96,15 +97,17 @@ export default async function handler(req: any, res: any): Promise<void> {
       payload.files.js
     ].join('\n');
 
-    const messages = buildCoreMessages(payload.messages);
+    const messages = await buildCoreMessages(payload.messages, modelConfig.provider);
     messages.unshift({
       role: 'user',
       content: `\n${contextFileDump}`
     });
 
-    const systemPrompt = payload.systemPromptOverride?.trim()
-      ? payload.systemPromptOverride.trim()
-      : `${SYSTEM_PROMPT}\n${COMPONENT_LIBRARY_PROMPT}`;
+    let systemPrompt = `${SYSTEM_PROMPT}\n${COMPONENT_LIBRARY_PROMPT}`;
+
+    if (payload.systemPromptOverride) {
+      systemPrompt = `Extra context to keep in mind: ${payload.systemPromptOverride?.trim()}\n` + systemPrompt;
+    }
 
     const promptChars = systemPrompt.length + messages.reduce((n, m) => n + JSON.stringify(m.content).length, 0);
     console.log(`[bwai] model=${payload.modelKey} promptChars=${promptChars} messages=${payload.messages.length}`);
@@ -120,8 +123,15 @@ export default async function handler(req: any, res: any): Promise<void> {
       model,
       system: systemPrompt,
       messages,
-      ...(modelConfig.reasoningModel ? {} : { temperature: 0.2 })
+      ...(modelConfig.reasoningModel ? {} : { temperature: 0.2 }),
+      providerOptions: modelConfig.provider === 'google'
+        ? { google: { generationConfig: { responseMimeType: 'application/json' } } }
+        : modelConfig.provider === 'openai'
+          ? { openai: { response_format: { type: 'json_object' } } }
+          : {}
     });
+
+    console.log('[bwai] messages:', messages);
 
     for await (const chunk of stream.textStream) {
       res.write(chunk);
@@ -173,14 +183,14 @@ export function parseIncomingBody(raw: unknown): IncomingBody {
       text: String((message as any).text ?? ''),
       attachments: Array.isArray((message as any).attachments)
         ? (message as any).attachments.map((attachment: any) => ({
-            id: String(attachment?.id ?? ''),
-            name: String(attachment?.name ?? 'attachment'),
-            mimeType: String(attachment?.mimeType ?? ''),
-            sizeBytes: Number(attachment?.sizeBytes ?? 0),
-            kind: attachment?.kind === 'url' ? 'url' : 'data-url',
-            dataUrl: attachment?.dataUrl ? String(attachment.dataUrl) : undefined,
-            url: attachment?.url ? String(attachment.url) : undefined
-          }))
+          id: String(attachment?.id ?? ''),
+          name: String(attachment?.name ?? 'attachment'),
+          mimeType: String(attachment?.mimeType ?? ''),
+          sizeBytes: Number(attachment?.sizeBytes ?? 0),
+          kind: attachment?.kind === 'url' ? 'url' : 'data-url',
+          dataUrl: attachment?.dataUrl ? String(attachment.dataUrl) : undefined,
+          url: attachment?.url ? String(attachment.url) : undefined
+        }))
         : []
     }))
   };
@@ -206,57 +216,85 @@ function resolveModel(provider: 'openai' | 'google', modelId: string): any {
   return google(modelId);
 }
 
-export function buildCoreMessages(messages: IncomingMessage[]): Array<{ role: 'user' | 'assistant'; content: unknown }> {
-  return messages.map((message) => {
-    if (message.role === 'assistant') {
-      return {
-        role: 'assistant',
-        content: message.text
-      };
-    }
-
-    const contentParts: Array<{
-      type: 'text' | 'image';
-      text?: string;
-      image?: string | Uint8Array;
-      mediaType?: string;
-    }> = [];
-    contentParts.push({
-      type: 'text',
-      text: message.text || 'Update content based on the attachments.'
-    });
-
-    for (const attachment of message.attachments) {
-      const imagePart = toImagePart(attachment);
-      if (!imagePart) {
-        continue;
+export async function buildCoreMessages(
+  messages: IncomingMessage[],
+  provider: 'openai' | 'google'
+): Promise<Array<{ role: 'user' | 'assistant'; content: unknown }>> {
+  return Promise.all(
+    messages.map(async (message) => {
+      if (message.role === 'assistant') {
+        return {
+          role: 'assistant',
+          content: message.text
+        };
       }
 
-      contentParts.push(imagePart);
-    }
+      const contentParts: Array<{
+        type: 'text' | 'image';
+        text?: string;
+        image?: string | Uint8Array;
+        mediaType?: string;
+      }> = [];
+      contentParts.push({
+        type: 'text',
+        text: message.text || 'Update content based on the attachments.'
+      });
 
-    return {
-      role: 'user',
-      content: contentParts
-    };
-  });
+      for (const attachment of message.attachments) {
+        // Placement support: inject URL as text so AI can reference it in generated code
+        const displayUrl = attachment.kind === 'url' ? (attachment.url ?? '') : '';
+        if (displayUrl) {
+          contentParts.push({
+            type: 'text',
+            text: `[Attached image "${attachment.name}" — URL: ${displayUrl}. Use this URL directly in <img src="..."> or CSS background-image if the user wants to place this image.]`
+          });
+        }
+
+        // Vision support: pass image as visual content part
+        const imagePart = await toImagePart(attachment, provider);
+        if (imagePart) {
+          contentParts.push(imagePart);
+        }
+      }
+
+      return {
+        role: 'user',
+        content: contentParts
+      };
+    })
+  );
 }
 
-function toImagePart(
-  attachment: IncomingAttachment
-): { type: 'image'; image: string | Uint8Array; mediaType?: string } | null {
+async function toImagePart(
+  attachment: IncomingAttachment,
+  provider: 'openai' | 'google'
+): Promise<{ type: 'image'; image: string | Uint8Array; mediaType?: string } | null> {
   if (attachment.kind === 'url') {
     const imageUrl = attachment.url?.trim() ?? '';
     if (!imageUrl) {
       return null;
     }
 
-    // Most providers accept remote URLs for images.
     if (/^https?:\/\//i.test(imageUrl)) {
-      return {
-        type: 'image',
-        image: imageUrl
-      };
+      if (provider === 'google') {
+        // Gemini requires base64 — fetch server-side, resize, and encode
+        try {
+          const response = await fetch(imageUrl);
+          if (!response.ok) return null;
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const resized = await sharp(buffer)
+            .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+            .toBuffer();
+          const base64 = resized.toString('base64');
+          const mimeType = attachment.mimeType || 'image/jpeg';
+          return { type: 'image', image: base64, mediaType: mimeType };
+        } catch {
+          return null;
+        }
+      }
+
+      // OpenAI supports remote URLs directly
+      return { type: 'image', image: imageUrl };
     }
 
     // If URL field contains a data URL, normalize it into base64 payload.

@@ -81,6 +81,13 @@ export class BuildWithAiApiService {
       text = lines.join('\n').trim();
     }
 
+    // Extract JSON object even if there is leading/trailing prose
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      text = text.slice(start, end + 1);
+    }
+
     const parsed = JSON.parse(text);
 
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed['edits'])) {

@@ -15,7 +15,7 @@ Structure constraints:
 - The site navigation is already present — do not duplicate it.
 
 Design direction:
-- Use the lp- design system already defined in content.css:
+- Use the lp- design system already provided by the preview shell:
   - Colors: --lp-rose (#ff3399 primary), --lp-rose-mid, --lp-rose-soft, --lp-rose-faint, --lp-cream, --lp-warm, --lp-dark, --lp-text, --lp-muted, --lp-border, --lp-white, --lp-gold
   - Fonts: var(--lp-serif) for headings, var(--lp-sans) for body text
   - Utilities: .lp-btn, .lp-btn--primary, .lp-btn--outline, .lp-btn--white, .lp-btn--lg, .lp-eyebrow, .lp-eyebrow--center
@@ -23,7 +23,7 @@ Design direction:
   - Radius tokens: --lp-r-sm, --lp-r-md, --lp-r-lg, --lp-r-xl
   - Shadow tokens: --lp-shadow, --lp-shadow-rose
   - Section classes: .lp-hero, .lp-trust, .lp-stats-bar, .lp-props, .lp-how, .lp-showcase, .lp-proof, .lp-guarantee, .lp-faq, .lp-cta-final
-- DO NOT re-import fonts or redefine :root tokens — they are already in content.css.
+- DO NOT re-import fonts or redefine :root tokens — they are already provided by the preview shell.
 - DO NOT redefine .lp-btn or other existing utilities — extend only if needed.
 - Prefer meaningful sections: hero, cards, feature lists, testimonials, FAQ, metrics, CTA.
 - You may add new CSS classes beyond the design system when useful, but stay consistent with the existing tokens.
@@ -51,6 +51,7 @@ Edit rules:
 - To delete content from an existing file, set "value" to the remainder of the "search" block without the deleted portion.
 - You may include multiple edit objects; they are applied in order.
 - If user asks to insert an image and no URL is given, use a descriptive placeholder: https://placehold.co/600x400?text=Image with suitable alt text.
+- If an attached image URL is provided in the message context (look for "URL: https://..."), use that exact URL in <img src="..."> or CSS background-image — never substitute a placeholder.
 - Images should be styled responsively: width: 100%; height: auto; border-radius matches surrounding elements.
 `;
 

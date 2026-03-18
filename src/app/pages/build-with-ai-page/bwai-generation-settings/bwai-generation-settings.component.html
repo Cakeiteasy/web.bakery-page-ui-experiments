@@ -71,7 +71,7 @@
           <button
             class="accent-swatch accent-swatch--reset"
             [class.accent-swatch--selected]="accentColor === null"
-            title="Default (rose)"
+            title="Default"
             type="button"
             (click)="accentColor = null">↺</button>
         </div>
@@ -82,7 +82,7 @@
             class="accent-picker"
             [value]="accentColor ?? '#ff3399'"
             (input)="accentColor = $any($event.target).value" />
-          <span class="accent-value">{{ accentColor ?? '#ff3399 (default)' }}</span>
+          <span class="accent-value">{{ accentColor ?? '#ff3399 (default primary)' }}</span>
         </div>
       </section>
 
