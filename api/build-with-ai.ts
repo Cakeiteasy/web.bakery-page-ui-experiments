@@ -131,8 +131,6 @@ export default async function handler(req: any, res: any): Promise<void> {
           : {}
     });
 
-    console.log('[bwai] messages:', messages);
-
     for await (const chunk of stream.textStream) {
       res.write(chunk);
     }
