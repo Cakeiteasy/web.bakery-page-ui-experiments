@@ -361,7 +361,6 @@ body {
   width: 93%;
   min-height: 48px;
   padding: 1.2rem 0;
-  border-bottom: 1px solid var(--cie-border);
   gap: 1.25rem;
 }
 
