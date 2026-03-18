@@ -36,6 +36,10 @@
       "dest": "/api/unsplash-search.ts"
     },
     {
+      "src": "/admin(.*)",
+      "dest": "/index.html"
+    },
+    {
       "src": "/(.*)",
       "dest": "/api/page-renderer.ts"
     }

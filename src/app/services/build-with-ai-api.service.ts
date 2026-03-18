@@ -71,6 +71,10 @@ export class BuildWithAiApiService {
   }
 
   private parseStreamedPayload(rawText: string): BuildWithAiApiResponse {
+    // Extract logId sentinel before any other processing
+    const logIdMatch = /\n__LOGID__([a-f0-9]+)__ENDLOGID__/.exec(rawText);
+    const logId = logIdMatch?.[1];
+
     let text = rawText.trim();
 
     // Strip code fence if the model wrapped its JSON in ```
@@ -107,7 +111,8 @@ export class BuildWithAiApiService {
       warnings: Array.isArray(parsed['warnings'])
         ? parsed['warnings'].map((w: unknown) => String(w))
         : [],
-      usage: parsed['usage'] ?? undefined
+      usage: parsed['usage'] ?? undefined,
+      logId
     };
   }
 }

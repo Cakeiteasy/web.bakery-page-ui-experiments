@@ -19,6 +19,8 @@ describe('BuildWithAiDiffService', () => {
     expect(result.files.html).toBe('<h1>Hi</h1>');
     expect(result.files.css).toBe('.a{color:red;}');
     expect(result.touchedFiles).toEqual(['content.html']);
+    expect(result.ok).toBeTrue();
+    expect(result.editResults[0].status).toBe('matched');
   });
 
   it('applies edits to multiple files', () => {
@@ -33,6 +35,7 @@ describe('BuildWithAiDiffService', () => {
     expect(result.files.html).toBe('<h1>Hi</h1>');
     expect(result.files.css).toBe('.a{color:blue;}');
     expect(result.touchedFiles).toEqual(['content.html', 'content.css']);
+    expect(result.ok).toBeTrue();
   });
 
   it('inserts content by including surrounding context in search', () => {
@@ -75,22 +78,41 @@ describe('BuildWithAiDiffService', () => {
     ).toThrowError(/unsupported file/i);
   });
 
-  it('throws when search string is not found', () => {
-    expect(() =>
-      service.applyEdits(
-        { html: '<p>hello</p>', css: '', js: '' },
-        [{ file: 'content.html', search: 'not-present', value: 'x' }]
-      )
-    ).toThrowError(/not found/i);
+  it('returns unmatched status when search string is not found', () => {
+    const result = service.applyEdits(
+      { html: '<p>hello</p>', css: '', js: '' },
+      [{ file: 'content.html', search: 'not-present', value: 'x' }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.editResults[0].status).toBe('unmatched');
+    expect(result.editResults[0].error).toMatch(/not found/i);
+    expect(result.files.html).toBe('<p>hello</p>');
   });
 
-  it('throws when search string is empty', () => {
-    expect(() =>
-      service.applyEdits(
-        { html: '<p>x</p>', css: '', js: '' },
-        [{ file: 'content.html', search: '', value: '<p>y</p>' }]
-      )
-    ).toThrowError(/must not be empty/i);
+  it('returns error status when search string is empty', () => {
+    const result = service.applyEdits(
+      { html: '<p>x</p>', css: '', js: '' },
+      [{ file: 'content.html', search: '', value: '<p>y</p>' }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.editResults[0].status).toBe('error');
+  });
+
+  it('continues processing all edits even if one fails', () => {
+    const result = service.applyEdits(
+      { html: '<h1>Hello</h1><p>World</p>', css: '', js: '' },
+      [
+        { file: 'content.html', search: 'not-found', value: 'x' },
+        { file: 'content.html', search: 'World', value: 'Earth' }
+      ]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.editResults[0].status).toBe('unmatched');
+    expect(result.editResults[1].status).toBe('matched');
+    expect(result.files.html).toBe('<h1>Hello</h1><p>Earth</p>');
   });
 
   it('inserts into an empty file using mode: insert', () => {
@@ -100,15 +122,19 @@ describe('BuildWithAiDiffService', () => {
     );
     expect(result.files.html).toBe('<h1>Hello</h1>');
     expect(result.touchedFiles).toEqual(['content.html']);
+    expect(result.ok).toBeTrue();
   });
 
-  it('throws when insert mode is used on a non-empty file', () => {
-    expect(() =>
-      service.applyEdits(
-        { html: '<p>existing</p>', css: '', js: '' },
-        [{ file: 'content.html', mode: 'insert', search: '', value: '<h1>Hello</h1>' }]
-      )
-    ).toThrowError(/insert mode requires an empty file/i);
+  it('returns unmatched when insert mode is used on a non-empty file', () => {
+    const result = service.applyEdits(
+      { html: '<p>existing</p>', css: '', js: '' },
+      [{ file: 'content.html', mode: 'insert', search: '', value: '<h1>Hello</h1>' }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.editResults[0].status).toBe('unmatched');
+    expect(result.editResults[0].error).toMatch(/insert mode requires an empty file/i);
+    expect(result.files.html).toBe('<p>existing</p>');
   });
 
   it('insertAfter inserts value immediately after the anchor string', () => {
@@ -118,6 +144,7 @@ describe('BuildWithAiDiffService', () => {
     );
     expect(result.files.html).toBe('<ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>');
     expect(result.touchedFiles).toEqual(['content.html']);
+    expect(result.ok).toBeTrue();
   });
 
   it('insertAfter inserts after first occurrence when anchor appears multiple times', () => {
@@ -137,21 +164,23 @@ describe('BuildWithAiDiffService', () => {
     expect(result.files.html).toBe('<section><h2>Title</h2></section>\n<section><h2>New</h2></section>');
   });
 
-  it('throws when insertAfter search string is empty', () => {
-    expect(() =>
-      service.applyEdits(
-        { html: '<p>x</p>', css: '', js: '' },
-        [{ file: 'content.html', mode: 'insertAfter', search: '', value: '<p>y</p>' }]
-      )
-    ).toThrowError(/must not be empty/i);
+  it('returns error when insertAfter search string is empty', () => {
+    const result = service.applyEdits(
+      { html: '<p>x</p>', css: '', js: '' },
+      [{ file: 'content.html', mode: 'insertAfter', search: '', value: '<p>y</p>' }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.editResults[0].status).toBe('error');
   });
 
-  it('throws when insertAfter search string is not found', () => {
-    expect(() =>
-      service.applyEdits(
-        { html: '<p>hello</p>', css: '', js: '' },
-        [{ file: 'content.html', mode: 'insertAfter', search: '<p>missing</p>', value: '<p>new</p>' }]
-      )
-    ).toThrowError(/not found/i);
+  it('returns unmatched when insertAfter search string is not found', () => {
+    const result = service.applyEdits(
+      { html: '<p>hello</p>', css: '', js: '' },
+      [{ file: 'content.html', mode: 'insertAfter', search: '<p>missing</p>', value: '<p>new</p>' }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.editResults[0].status).toBe('unmatched');
   });
 });

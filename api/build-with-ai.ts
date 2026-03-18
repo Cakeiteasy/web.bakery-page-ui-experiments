@@ -2,8 +2,10 @@ import { streamText, CoreMessage } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import sharp from 'sharp';
+import { ObjectId } from 'mongodb';
 
 import { COMPONENT_LIBRARY_PROMPT, SYSTEM_PROMPT } from './build-with-ai.prompt.js';
+import clientPromise, { dbName } from '../lib/mongodb.js';
 
 interface IncomingAttachment {
   id: string;
@@ -33,6 +35,8 @@ interface IncomingBody {
   messages: IncomingMessage[];
   files: IncomingFiles;
   systemPromptOverride?: string | null;
+  pageId?: string;
+  pageSlug?: string;
 }
 
 interface SearchReplaceEdit {
@@ -112,6 +116,32 @@ export default async function handler(req: any, res: any): Promise<void> {
     const promptChars = systemPrompt.length + messages.reduce((n, m) => n + JSON.stringify(m.content).length, 0);
     console.log(`[bwai] model=${payload.modelKey} promptChars=${promptChars} messages=${payload.messages.length}`);
 
+    // Insert initial log document before streaming starts
+    const lastUserMsg = [...payload.messages].reverse().find(m => m.role === 'user');
+    const logDocId = new ObjectId();
+    const mongoClient = await clientPromise;
+    const db = mongoClient.db(dbName);
+    const logsCol = db.collection('bwai_ai_logs');
+    await logsCol.insertOne({
+      _id: logDocId,
+      pageId: payload.pageId ? (() => { try { return new ObjectId(payload.pageId); } catch { return null; } })() : null,
+      pageSlug: payload.pageSlug ?? null,
+      modelKey: payload.modelKey,
+      provider: modelConfig.provider,
+      lastUserMessage: lastUserMsg?.text ?? '',
+      edits: [],
+      applyResults: null,
+      applyStatus: null,
+      rejectionReason: null,
+      inputTokens: null,
+      outputTokens: null,
+      llmTimeMs: null,
+      totalTimeMs: null,
+      warnings: [],
+      createdAt: new Date()
+    });
+    const logId = String(logDocId);
+
     // Stream response so Vercel doesn't kill the function on long LLM calls
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
@@ -136,8 +166,20 @@ export default async function handler(req: any, res: any): Promise<void> {
     }
 
     const usage = await stream.usage;
-    console.log(`[bwai] llm=${Date.now() - tLlm}ms total=${Date.now() - t0}ms inputTokens=${(usage as any)?.inputTokens ?? (usage as any)?.promptTokens} outputTokens=${(usage as any)?.outputTokens ?? (usage as any)?.completionTokens}`);
+    const inputTokens = (usage as any)?.inputTokens ?? (usage as any)?.promptTokens ?? null;
+    const outputTokens = (usage as any)?.outputTokens ?? (usage as any)?.completionTokens ?? null;
+    const llmTimeMs = Date.now() - tLlm;
+    const totalTimeMs = Date.now() - t0;
+    console.log(`[bwai] llm=${llmTimeMs}ms total=${totalTimeMs}ms inputTokens=${inputTokens} outputTokens=${outputTokens}`);
 
+    // Update log with token/timing data
+    await logsCol.updateOne(
+      { _id: logDocId },
+      { $set: { inputTokens, outputTokens, llmTimeMs, totalTimeMs } }
+    );
+
+    // Write logId sentinel so frontend can extract it without disrupting JSON parsing
+    res.write(`\n__LOGID__${logId}__ENDLOGID__`);
     res.end();
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to generate patch.';
@@ -170,6 +212,8 @@ export function parseIncomingBody(raw: unknown): IncomingBody {
   return {
     modelKey: typedPayload.modelKey,
     systemPromptOverride: typedPayload.systemPromptOverride ?? null,
+    pageId: typedPayload.pageId ? String(typedPayload.pageId) : undefined,
+    pageSlug: typedPayload.pageSlug ? String(typedPayload.pageSlug) : undefined,
     files: {
       html: String(files.html ?? ''),
       css: String(files.css ?? ''),

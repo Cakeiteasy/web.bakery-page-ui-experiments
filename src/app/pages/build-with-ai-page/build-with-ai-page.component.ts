@@ -30,6 +30,7 @@ import { BuildWithAiContextMeterService } from '../../services/build-with-ai-con
 import { BuildWithAiDiffService } from '../../services/build-with-ai-diff.service';
 import { BuildWithAiSessionService } from '../../services/build-with-ai-session.service';
 import { BuildWithAiSyntaxValidatorService } from '../../services/build-with-ai-syntax-validator.service';
+import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
 import { BwaiPageService } from '../../services/bwai-page.service';
 import {
   BUILD_WITH_AI_FONT_PAIRS,
@@ -83,6 +84,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private readonly syntaxValidator = inject(BuildWithAiSyntaxValidatorService);
   private readonly domSanitizer = inject(DomSanitizer);
   private readonly bwaiPageService = inject(BwaiPageService);
+  private readonly aiLogService = inject(BwaiAiLogService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
 
@@ -967,6 +969,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private async generateAndApplyPatch(): Promise<void> {
     this.processing.set(true);
     let lastRawDiff: string | null = null;
+    let logId: string | undefined;
 
     try {
       // Keep only the last 10 messages to avoid unbounded context growth
@@ -975,15 +978,20 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         ? allMessages.slice(-10)
         : allMessages;
 
+      const page = this.currentPage();
       const response = await this.apiService.requestPatch(
         {
           modelKey: this.selectedModel().key,
           messages: trimmedMessages,
           files: this.files(),
-          systemPromptOverride: this.systemPromptOverride()
+          systemPromptOverride: this.systemPromptOverride(),
+          pageId: page?.id,
+          pageSlug: page?.slug
         },
         this.demoKey() ?? undefined
       );
+
+      logId = response.logId;
 
       if (!response.edits?.length) {
         throw new Error('AI response did not include any edits.');
@@ -991,6 +999,44 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
       lastRawDiff = JSON.stringify(response.edits);
       const diffResult = this.diffService.applyEdits(this.files(), response.edits);
+
+      // Check for unmatched edits before syntax validation
+      if (!diffResult.ok) {
+        const unmatchedDetails = diffResult.editResults
+          .filter(r => r.status !== 'matched')
+          .map(r => `${r.file}: ${r.error ?? r.status}`)
+          .join(' | ');
+        this.pushPatchLog(JSON.stringify(response.edits), 'rejected', `Unmatched edits: ${unmatchedDetails}`);
+        this.setError('patch', `Patch rejected: ${unmatchedDetails}`);
+
+        this.messages.update((messages) => [
+          ...messages,
+          {
+            id: this.createId('assistant'),
+            role: 'assistant',
+            text: response.assistantText || 'Patch could not be applied — some edits did not match the current file content.',
+            createdAt: Date.now(),
+            attachments: [],
+            errorCategory: 'patch'
+          }
+        ]);
+
+        if (logId) {
+          void this.aiLogService.updateLogAsync(logId, {
+            applyResults: diffResult.editResults,
+            applyStatus: 'rejected',
+            rejectionReason: `Unmatched edits: ${unmatchedDetails}`,
+            warnings: response.warnings
+          });
+        }
+
+        void this.persistToMongo({ messages: this.messages(), patchLogs: this.patchLogs() });
+        if (page) {
+          void this.bwaiPageService.saveVersionAsync(page.id, { files: this.files(), diff: JSON.stringify(response.edits), status: 'rejected' });
+        }
+        return;
+      }
+
       const validation = this.syntaxValidator.validate(diffResult.files);
 
       if (!validation.valid) {
@@ -1010,9 +1056,16 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           }
         ]);
 
+        if (logId) {
+          void this.aiLogService.updateLogAsync(logId, {
+            applyResults: diffResult.editResults,
+            applyStatus: 'rejected',
+            rejectionReason: `Syntax validation: ${details}`,
+            warnings: response.warnings
+          });
+        }
+
         void this.persistToMongo({ messages: this.messages(), patchLogs: this.patchLogs() });
-        // Save rejected version
-        const page = this.currentPage();
         if (page) {
           void this.bwaiPageService.saveVersionAsync(page.id, { files: this.files(), diff: JSON.stringify(response.edits), status: 'rejected' });
         }
@@ -1023,6 +1076,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       const { html: patchedHtmlWithIds } = this.ensureSectionIds(patchedHtml);
       this.files.set({ ...diffResult.files, html: patchedHtmlWithIds });
       this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
+
+      if (logId) {
+        void this.aiLogService.updateLogAsync(logId, {
+          applyResults: diffResult.editResults,
+          applyStatus: 'applied',
+          warnings: response.warnings
+        });
+      }
 
       const warningsText = response.warnings.length ? `\n\nWarnings:\n- ${response.warnings.join('\n- ')}` : '';
       this.messages.update((messages) => [
@@ -1037,7 +1098,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       ]);
 
       // Persist to MongoDB and save version in parallel
-      const page = this.currentPage();
       if (page) {
         void Promise.all([
           this.persistToMongo({ currentFiles: diffResult.files, messages: this.messages(), patchLogs: this.patchLogs() }),
@@ -1603,6 +1663,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var clone = root.cloneNode(true);
           var ces = clone.querySelectorAll('[contenteditable]');
           for (var i = 0; i < ces.length; i++) ces[i].removeAttribute('contenteditable');
+          var bound = clone.querySelectorAll('[data-bwai-edit-bound]');
+          for (var i = 0; i < bound.length; i++) bound[i].removeAttribute('data-bwai-edit-bound');
           var extras = clone.querySelectorAll('.bwai-inline-popup,.bwai-toolbar,.bwai-link-bar');
           for (var j = 0; j < extras.length; j++) extras[j].remove();
           return clone.innerHTML;

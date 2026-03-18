@@ -58,6 +58,8 @@ export interface BuildWithAiApiRequest {
   messages: BuildWithAiChatMessage[];
   files: BuildWithAiEditableFiles;
   systemPromptOverride?: string | null;
+  pageId?: string;
+  pageSlug?: string;
 }
 
 export interface BuildWithAiUsage {
@@ -78,6 +80,7 @@ export interface BuildWithAiApiResponse {
   edits: BuildWithAiSearchReplaceEdit[];
   warnings: string[];
   usage?: BuildWithAiUsage;
+  logId?: string;
 }
 
 export interface BuildWithAiValidationIssue {
@@ -97,9 +100,19 @@ export interface BuildWithAiContextEstimate {
   nearLimit: boolean;
 }
 
+export interface BuildWithAiEditApplyResult {
+  file: string;
+  mode: string;
+  search: string;
+  status: 'matched' | 'unmatched' | 'error';
+  error?: string;
+}
+
 export interface BuildWithAiDiffApplyResult {
   files: BuildWithAiEditableFiles;
   touchedFiles: BuildWithAiEditableFileName[];
+  editResults: BuildWithAiEditApplyResult[];
+  ok: boolean;
 }
 
 export const BUILD_WITH_AI_FILE_NAMES: BuildWithAiEditableFileName[] = [
