@@ -1835,10 +1835,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
             a.contentEditable = 'true';
             a.addEventListener('blur', save);
             (function(el) {
+              el.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+              });
               el.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                el.focus();
+                el.focus({ preventScroll: true });
               });
               el.addEventListener('focus', function() { showLinkEditBar(el); });
             })(a);
