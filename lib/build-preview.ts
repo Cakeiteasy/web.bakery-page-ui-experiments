@@ -226,7 +226,6 @@ ul {
 }
 
 #PageFooter {
-  margin-top: 2rem;
   background: var(--cie-secondary-bg);
 }
 
@@ -458,7 +457,6 @@ body {
 }
 
 #PageFooter {
-  margin-top: 2.25rem;
   background-color: var(--cie-secondary-bg);
 }
 
