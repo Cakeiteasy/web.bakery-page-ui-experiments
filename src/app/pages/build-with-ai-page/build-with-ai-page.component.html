@@ -49,7 +49,7 @@
   </nav>
 
   <div class="build-with-ai-page__workspace">
-    <section class="preview-pane" [class.preview-pane--busy]="processing()" [class.preview-pane--selecting]="selectionModeActive()">
+    <section class="preview-pane" [class.preview-pane--busy]="processing()">
 
       <div class="preview-toolbar">
         <div class="preview-toolbar__chrome">
@@ -205,31 +205,6 @@
                   aria-label="Deselect section"
                   (click)="onDeselectSection()"
                 >✕</button>
-              </div>
-
-              <div class="section-insert-wrap">
-                <button
-                  type="button"
-                  class="section-ctx__insert-btn"
-                  [class.section-ctx__insert-btn--active]="showInsertMenu()"
-                  title="Insert a new section"
-                  (click)="onToggleInsertMenu()"
-                >+ Insert</button>
-
-                <div class="insert-menu" *ngIf="showInsertMenu()">
-                  <button
-                    type="button"
-                    class="insert-menu__item"
-                    *ngFor="let type of insertSectionTypes"
-                    (click)="onInsertSection(type)"
-                  >{{ type }}</button>
-                  <div class="insert-menu__sep" aria-hidden="true"></div>
-                  <button
-                    type="button"
-                    class="insert-menu__item insert-menu__item--custom"
-                    (click)="onInsertSection('custom')"
-                  >Custom…</button>
-                </div>
               </div>
             </div>
           </div>

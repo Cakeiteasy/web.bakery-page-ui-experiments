@@ -67,16 +67,6 @@ export interface SelectedSection {
   outerHtml: string;
 }
 
-const INSERT_SECTION_TYPES = [
-  'Hero',
-  'Feature Cards',
-  'Testimonials',
-  'Stats Bar',
-  'FAQ',
-  'CTA Banner',
-  'Logo Cloud',
-  'Contact Form'
-] as const;
 
 @Component({
   selector: 'app-build-with-ai-page',
@@ -97,7 +87,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
 
   readonly modelOptions = BUILD_WITH_AI_MODELS;
-  readonly insertSectionTypes = INSERT_SECTION_TYPES;
 
   readonly loading = signal<boolean>(true);
   readonly processing = signal<boolean>(false);
@@ -113,10 +102,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   readonly activeError = signal<{ category: BuildWithAiErrorCategory; message: string } | null>(null);
 
   // Section selection
-  readonly selectionModeActive = signal<boolean>(false);
   readonly selectedSection = signal<SelectedSection | null>(null);
   readonly hiddenSections = signal<string[]>([]);
-  readonly showInsertMenu = signal<boolean>(false);
 
   // Viewport toggle
   readonly viewportMode = signal<'desktop' | 'mobile'>('desktop');
@@ -266,14 +253,26 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       return;
     }
 
+    if (payload.type === 'bwai-insert') {
+      this.onInsertSection(String((payload as any).sectionType ?? 'custom'));
+      return;
+    }
+
     if (payload.type === 'bwai-action') {
       switch (payload.action) {
         case 'move-up':   this.onMoveSectionUp();    break;
         case 'move-down': this.onMoveSectionDown();   break;
         case 'hide':      this.onToggleHideSection(); break;
         case 'remove':    this.onRemoveSection();     break;
-        case 'insert':    this.showInsertMenu.set(true); break;
-        case 'select':    this.selectionModeActive.set(true); break;
+        case 'select': {
+          const sel = this.selectedSection();
+          if (sel) {
+            this.previewIframe?.nativeElement.contentWindow?.postMessage(
+              { type: 'bwai-highlight', selector: sel.selector }, '*'
+            );
+          }
+          break;
+        }
       }
       return;
     }
@@ -354,7 +353,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
       this.selectedSection.set(null);
       this.hiddenSections.set(page.hiddenSections ?? []);
-      this.showInsertMenu.set(false);
 
       this.activeSrcdoc.set(this.buildPreviewDocument(this.files(), page.hiddenSections ?? []));
 
@@ -743,8 +741,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         this.showSeoModal.set(false);
       } else if (this.showNewPageDialog()) {
         this.showNewPageDialog.set(false);
-      } else if (this.showInsertMenu()) {
-        this.showInsertMenu.set(false);
       } else if (this.selectedSection()) {
         this.onDeselectSection();
       }
@@ -768,10 +764,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     const win = this.previewIframe?.nativeElement.contentWindow;
     if (!win) return;
 
-    if (this.selectionModeActive()) {
-      win.postMessage({ type: 'bwai-mode', enabled: true }, '*');
-    }
-
     const sel = this.selectedSection();
     if (sel) {
       win.postMessage({ type: 'bwai-highlight', selector: sel.selector }, '*');
@@ -782,25 +774,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.viewportMode.set(mode);
   }
 
-  onToggleSelectionMode(): void {
-    const next = !this.selectionModeActive();
-    this.selectionModeActive.set(next);
-
-    const win = this.previewIframe?.nativeElement.contentWindow;
-    if (win) {
-      win.postMessage({ type: 'bwai-mode', enabled: next }, '*');
-    }
-
-    if (!next) {
-      this.selectedSection.set(null);
-      this.showInsertMenu.set(false);
-      win?.postMessage({ type: 'bwai-highlight', selector: null }, '*');
-    }
-  }
-
   onDeselectSection(): void {
     this.selectedSection.set(null);
-    this.showInsertMenu.set(false);
     this.previewIframe?.nativeElement.contentWindow?.postMessage(
       { type: 'bwai-highlight', selector: null },
       '*'
@@ -851,13 +826,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
   // ── Insert section ─────────────────────────────
 
-  onToggleInsertMenu(): void {
-    this.showInsertMenu.update((v) => !v);
-  }
-
   onInsertSection(type: string): void {
-    this.showInsertMenu.set(false);
-
     const sel = this.selectedSection();
     const afterText = sel
       ? ` after the ${sel.selector} section (index ${sel.sectionIndex})`
@@ -895,7 +864,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.draftMessage.set('');
     this.pendingAttachments.set([]);
     this.activeError.set(null);
-    this.showInsertMenu.set(false);
     this.resetTextareaHeight();
 
     await this.generateAndApplyPatch();
@@ -905,11 +873,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.activeError.set(null);
     this.pendingAttachments.set([]);
     this.selectedSection.set(null);
-    this.showInsertMenu.set(false);
-
-    if (this.selectionModeActive()) {
-      this.selectionModeActive.set(false);
-    }
 
     this.messages.set([
       {
@@ -1318,13 +1281,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     </script>
 
     <script>
-      /* ---- section selection mode ---- */
+      /* ---- section toolbar ---- */
       (function () {
-        var selActive = false;
         var hoveredEl = null;
         var toolbar = null;
         var toolbarSection = null;
         var toolbarOrigPos = '';
+        var insertMenu = null;
+
+        var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form'];
 
         /* ── helpers ── */
         function getCleanOuterHtml(el) {
@@ -1359,6 +1324,53 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var bwaiId = el.getAttribute('data-bwai-id') || '';
           return { idx: idx, total: siblings.length, selector: selector, bwaiId: bwaiId };
         }
+
+        /* ── insert popup ── */
+        function hideInsertPopup() {
+          if (insertMenu) { insertMenu.remove(); insertMenu = null; }
+        }
+
+        function showInsertPopup(anchorBtn) {
+          hideInsertPopup();
+          var menu = document.createElement('div');
+          menu.className = 'bwai-insert-popup';
+          INSERT_TYPES.forEach(function(type) {
+            var item = document.createElement('button');
+            item.textContent = type;
+            item.addEventListener('click', function(e) {
+              e.stopPropagation();
+              hideInsertPopup();
+              parent.postMessage({ type: 'bwai-insert', sectionType: type }, '*');
+            });
+            menu.appendChild(item);
+          });
+          var sep = document.createElement('div');
+          sep.className = 'bwai-insert-sep';
+          menu.appendChild(sep);
+          var custom = document.createElement('button');
+          custom.className = 'bwai-insert-custom';
+          custom.textContent = 'Custom\u2026';
+          custom.addEventListener('click', function(e) {
+            e.stopPropagation();
+            hideInsertPopup();
+            parent.postMessage({ type: 'bwai-insert', sectionType: 'custom' }, '*');
+          });
+          menu.appendChild(custom);
+          // Position near the anchor button
+          document.body.appendChild(menu);
+          var ar = anchorBtn.getBoundingClientRect();
+          var mr = menu.getBoundingClientRect();
+          var top = ar.bottom + 6;
+          var left = ar.left;
+          if (left + mr.width > window.innerWidth - 8) left = ar.right - mr.width;
+          menu.style.top = top + 'px';
+          menu.style.left = left + 'px';
+          insertMenu = menu;
+        }
+
+        document.addEventListener('click', function(e) {
+          if (insertMenu && !insertMenu.contains(e.target)) hideInsertPopup();
+        }, true);
 
         /* ── toolbar ── */
         function removeToolbar() {
@@ -1455,6 +1467,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
               return;
             }
 
+            // Insert is handled locally — show popup in iframe
+            if (action === 'insert') {
+              showInsertPopup(b);
+              return;
+            }
+
             var m2 = getSectionMeta(toolbarSection);
             var lbl = m2.selector.replace(/^\\.lp-/, '').replace(/-/g, ' ');
             lbl = lbl.charAt(0).toUpperCase() + lbl.slice(1);
@@ -1479,16 +1497,6 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         window.addEventListener('message', function (event) {
           var d = event.data;
           if (!d || typeof d !== 'object') return;
-
-          if (d.type === 'bwai-mode') {
-            selActive = !!d.enabled;
-            document.body.style.cursor = selActive ? 'crosshair' : '';
-            if (!selActive) {
-              clearClass('bwai-hover');
-              clearClass('bwai-selected');
-              // toolbar stays — it follows hover regardless of selection mode
-            }
-          }
 
           if (d.type === 'bwai-highlight') {
             clearClass('bwai-selected');
@@ -1554,7 +1562,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           clearClass('bwai-hover');
           hoveredEl = sec;
           if (sec) {
-            if (selActive) sec.classList.add('bwai-hover');
+            sec.classList.add('bwai-hover');
             var hm = getSectionMeta(sec);
             buildToolbar(sec, hm.idx, hm.total);
           } else {
@@ -1562,40 +1570,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           }
         });
 
-        /* ── click to select ── */
-        document.addEventListener('click', function (event) {
-          if (!selActive) return;
-          if (toolbar && toolbar.contains(event.target)) return;
-          var sec = getSection(event.target);
-          if (!sec) return;
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          clearClass('bwai-hover');
-          clearClass('bwai-selected');
-          sec.classList.add('bwai-selected');
-          hoveredEl = null;
-
-          var m = getSectionMeta(sec);
-          buildToolbar(sec, m.idx, m.total);
-
-          var label = m.selector.replace(/^\\.lp-/, '').replace(/-/g, ' ');
-          label = label.charAt(0).toUpperCase() + label.slice(1);
-
-          parent.postMessage({
-            type: 'bwai-selected',
-            selector: m.selector,
-            bwaiId: m.bwaiId,
-            label: label,
-            sectionIndex: m.idx,
-            totalSections: m.total,
-            outerHtml: getCleanOuterHtml(sec)
-          }, '*');
-        }, true);
-
         /* ── CSS ── */
         var style = document.createElement('style');
         style.textContent = [
-          '.bwai-hover{outline:2px dashed #ff3399!important;outline-offset:-2px;cursor:crosshair!important}',
+          '.bwai-hover{outline:2px dashed #ff3399!important;outline-offset:-2px}',
           '.bwai-selected{outline:2px solid #ff3399!important;outline-offset:-2px;background-color:rgba(255,51,153,0.04)!important}',
           '.bwai-hidden{opacity:0.25!important;max-height:50px!important;overflow:hidden!important}',
           '.bwai-toolbar{position:absolute;top:10px;left:10px;z-index:99999;display:flex;gap:5px;pointer-events:all}',
@@ -1604,7 +1582,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           '.bwai-toolbar button:last-child{border-right:none}',
           '.bwai-toolbar button:hover:not(:disabled){background:#fff0f7;color:#ff3399}',
           '.bwai-toolbar button:disabled{opacity:.3;cursor:not-allowed}',
-          '.bwai-btn--danger:hover:not(:disabled){background:#fff5f5!important;color:#e53e3e!important}'
+          '.bwai-btn--danger:hover:not(:disabled){background:#fff5f5!important;color:#e53e3e!important}',
+          '.bwai-insert-popup{position:fixed;z-index:100000;background:#fff;border:1px solid rgba(0,0,0,0.12);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.15);padding:4px;min-width:160px}',
+          '.bwai-insert-popup button{display:block;width:100%;border:none;background:none;padding:6px 12px;text-align:left;font-size:12px;font-weight:500;cursor:pointer;border-radius:4px;color:#333;font-family:-apple-system,sans-serif}',
+          '.bwai-insert-popup button:hover{background:#fff0f7;color:#ff3399}',
+          '.bwai-insert-sep{height:1px;background:#f0f0f0;margin:4px 0}',
+          '.bwai-insert-custom{color:#888!important;font-style:italic}'
         ].join('');
         document.head.appendChild(style);
       })();
@@ -1790,6 +1773,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
             a.contentEditable = 'true';
             a.addEventListener('blur', save);
             (function(el) {
+              el.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                el.focus();
+              });
               el.addEventListener('focus', function() { showLinkEditBar(el); });
             })(a);
           }
