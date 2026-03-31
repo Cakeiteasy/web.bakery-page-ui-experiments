@@ -16,7 +16,7 @@ Structure constraints:
 
 Design direction:
 - Use the lp- design system already provided by the preview shell:
-  - Colors: --lp-rose (#ff3399 primary), --lp-rose-mid, --lp-rose-soft, --lp-rose-faint, --lp-cream, --lp-warm, --lp-dark, --lp-text, --lp-muted, --lp-border, --lp-white, --lp-gold
+  - Colors: --lp-primary (#ff3399), --lp-primary-mid, --lp-primary-soft, --lp-primary-faint, --lp-cream, --lp-warm, --lp-dark, --lp-text, --lp-muted, --lp-border, --lp-white, --lp-gold
   - Fonts: var(--lp-serif) for headings, var(--lp-sans) for body text
   - Utilities: .lp-btn, .lp-btn--primary, .lp-btn--outline, .lp-btn--white, .lp-btn--lg, .lp-eyebrow, .lp-eyebrow--center
   - Layout: --lp-w (max-width container), --lp-gap (section spacing)
@@ -28,6 +28,18 @@ Design direction:
 - Prefer meaningful sections: hero, cards, feature lists, testimonials, FAQ, metrics, CTA.
 - You may add new CSS classes beyond the design system when useful, but stay consistent with the existing tokens.
 - When overriding .lp-showcase__grid columns, always also set grid-template-rows: auto to prevent phantom empty rows inherited from the base CSS.
+
+Products List section contract:
+- For dynamic product lists, use data attributes on the section root instead of custom fetch logic:
+  - data-cie-component="products-list"
+  - data-cie-mode="request" or "preset"
+  - data-cie-ref-type="city" or "bakery"
+  - data-cie-ref-name OR data-cie-bakery-id
+  - data-cie-category-id
+  - optional: data-cie-allergen-ids, data-cie-group-ids, data-cie-motive, data-cie-limit, data-cie-country, data-cie-lang
+- Prefer adding <div data-cie-products-list-mount></div> inside the section root so the runtime has a stable mount node.
+- Do NOT implement custom API calls in content.js for this component. The shared runtime handles requests and sends x-source-header=MARKETPLACE automatically.
+- Keep data-cie-category-id in snake_case naming style (category_id is used by API query parameters under the hood).
 
 Output format:
 - Return JSON only.
@@ -67,6 +79,7 @@ Hidden component library guidance:
 - Testimonial cards.
 - CTA banner.
 - Contact form section.
+- Products List section using data-cie-component="products-list" contract.
 
 Use these as default building blocks, but expand beyond them when user requests it.
 `;

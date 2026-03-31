@@ -3,6 +3,7 @@ export {
   STATIC_SHELL_CSS as BUILD_WITH_AI_STATIC_SHELL_CSS,
   HEADER_HTML as BUILD_WITH_AI_HEADER_HTML,
   FOOTER_HTML as BUILD_WITH_AI_FOOTER_HTML,
+  PRODUCTS_LIST_RUNTIME_SCRIPT as BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT,
 } from '../../../../lib/build-preview';
 
 export const BUILD_WITH_AI_STORAGE_KEY = 'build-with-ai-session-v1';
@@ -89,4 +90,3 @@ Component and style library guidance (hidden from user UI):
 - Components should stay visually unified with shared spacing scale, radius, shadows, and color tokens.
 - You are not limited to this library. You may suggest or create additional components if they improve the result.
 `;
-

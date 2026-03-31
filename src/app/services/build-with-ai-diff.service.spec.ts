@@ -183,4 +183,36 @@ describe('BuildWithAiDiffService', () => {
     expect(result.ok).toBeFalse();
     expect(result.editResults[0].status).toBe('unmatched');
   });
+
+  it('insertAfter tolerates CRLF/LF mismatch in anchor text', () => {
+    const result = service.applyEdits(
+      { html: '<section>\r\n  <h2>Title</h2>\r\n</section>', css: '', js: '' },
+      [{
+        file: 'content.html',
+        mode: 'insertAfter',
+        search: '<section>\n  <h2>Title</h2>\n</section>',
+        value: '\n<section><h2>New</h2></section>'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.files.html).toBe('<section>\n  <h2>Title</h2>\n</section>\n<section><h2>New</h2></section>');
+    expect(result.editResults[0].status).toBe('matched');
+  });
+
+  it('insertAfter appends to EOF for css when brace-only anchor is missing', () => {
+    const result = service.applyEdits(
+      { html: '', css: '.a{color:red;}', js: '' },
+      [{
+        file: 'content.css',
+        mode: 'insertAfter',
+        search: '    }\n  }\n}',
+        value: '\n.b{color:blue;}'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.files.css).toBe('.a{color:red;}\n.b{color:blue;}');
+    expect(result.editResults[0].status).toBe('matched');
+  });
 });

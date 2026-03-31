@@ -47,11 +47,43 @@ export class BuildWithAiDiffService {
           editResults.push({ ...resultBase, status: 'error', error: `Search string must not be empty for insertAfter mode (file: ${edit.file}).` });
           continue;
         }
-        if (!currentContent.includes(edit.search)) {
+
+        const exactIndex = currentContent.indexOf(edit.search);
+        let anchorEnd = -1;
+
+        if (exactIndex >= 0) {
+          anchorEnd = exactIndex + edit.search.length;
+        } else {
+          const normalizedCurrent = currentContent.replace(/\r\n/g, '\n');
+          const normalizedSearch = edit.search.replace(/\r\n/g, '\n');
+          const normalizedIndex = normalizedCurrent.indexOf(normalizedSearch);
+
+          if (normalizedIndex >= 0) {
+            // Apply on normalized content to avoid CRLF/LF anchor mismatches.
+            nextFiles[contentKey] =
+              normalizedCurrent.slice(0, normalizedIndex + normalizedSearch.length) +
+              edit.value +
+              normalizedCurrent.slice(normalizedIndex + normalizedSearch.length);
+            touchedFiles.add(edit.file);
+            editResults.push({ ...resultBase, status: 'matched' });
+            continue;
+          }
+
+          if (
+            edit.file === 'content.css' &&
+            this.isBraceOnlySearch(edit.search)
+          ) {
+            // AI occasionally uses a generic trailing brace snippet as anchor for CSS section append.
+            // If no exact match exists, append at EOF instead of rejecting the whole patch.
+            anchorEnd = currentContent.length;
+          }
+        }
+
+        if (anchorEnd < 0) {
           editResults.push({ ...resultBase, status: 'unmatched', error: `Search string not found in ${edit.file}.` });
           continue;
         }
-        const anchorEnd = currentContent.indexOf(edit.search) + edit.search.length;
+
         nextFiles[contentKey] = currentContent.slice(0, anchorEnd) + edit.value + currentContent.slice(anchorEnd);
         touchedFiles.add(edit.file);
         editResults.push({ ...resultBase, status: 'matched' });
@@ -87,5 +119,10 @@ export class BuildWithAiDiffService {
     if (fileName === 'content.html') return 'html';
     if (fileName === 'content.css') return 'css';
     return 'js';
+  }
+
+  private isBraceOnlySearch(value: string): boolean {
+    const compact = value.replace(/\s/g, '');
+    return compact.length >= 2 && /^}+$/.test(compact);
   }
 }

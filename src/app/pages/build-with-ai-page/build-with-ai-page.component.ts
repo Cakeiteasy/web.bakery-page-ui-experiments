@@ -37,6 +37,7 @@ import {
   BUILD_WITH_AI_FOOTER_HTML,
   BUILD_WITH_AI_HEADER_HTML,
   BUILD_WITH_AI_MODELS,
+  BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT,
   BUILD_WITH_AI_STATIC_SHELL_CSS,
   BUILD_WITH_AI_STORAGE_KEY
 } from './build-with-ai.constants';
@@ -186,7 +187,13 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       const f = this.files();
       if (!this.iframeReady) return;
       if (this.skipNextIframePatch) { this.skipNextIframePatch = false; return; }
-      this.sendToIframe({ type: 'bwai-patch', html: f.html, css: f.css, js: f.js });
+      this.sendToIframe({
+        type: 'bwai-patch',
+        html: f.html,
+        css: f.css,
+        js: f.js,
+        productsRuntime: BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT
+      });
     });
 
     // Live-patch hidden-section visibility when the set changes
@@ -245,7 +252,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     if (payload.type === 'bwai-inline-edit-save') {
       const newHtml = this.normalizeHtml(String((payload as any).html ?? ''));
-      const updated = { ...this.files(), html: newHtml };
+      const { html: htmlWithIds } = this.ensureSectionIds(newHtml);
+      const updated = { ...this.files(), html: htmlWithIds };
       const validation = this.syntaxValidator.validate(updated);
       if (validation.valid) {
         this.skipNextIframePatch = true;
@@ -766,6 +774,16 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     const win = this.previewIframe?.nativeElement.contentWindow;
     if (!win) return;
 
+    const files = this.files();
+    win.postMessage({
+      type: 'bwai-patch',
+      html: files.html,
+      css: files.css,
+      js: files.js,
+      productsRuntime: BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT
+    }, '*');
+    win.postMessage({ type: 'bwai-hidden-css', ids: this.hiddenSections() }, '*');
+
     const sel = this.selectedSection();
     if (sel) {
       win.postMessage({ type: 'bwai-highlight', selector: sel.selector }, '*');
@@ -834,9 +852,25 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       ? ` after the ${sel.selector} section (index ${sel.sectionIndex})`
       : ' at the end of the page';
 
-    this.draftMessage.set(
-      `Insert a "${type}" section${afterText}. Match the existing lp- CSS class naming convention, rose #FF3399 accent, and design tokens.`
-    );
+    let prompt = `Insert a "${type}" section${afterText}. Match the existing lp- CSS class naming convention, primary accent (--lp-primary), and design tokens.`;
+
+    if (type === 'Products List (Request)') {
+      prompt = [
+        `Insert a "Products List (Request)" section${afterText}.`,
+        'Use a contract-based section root exactly like this:',
+        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="request" data-cie-ref-type="city" data-cie-country="NO" data-cie-lang="no" data-cie-limit="8"><div data-cie-products-list-mount></div></section>',
+        'Do not write custom API fetching code in content.js for this section. The runtime handles requests and sends x-source-header=MARKETPLACE.'
+      ].join('\n');
+    } else if (type === 'Products List (Preset)') {
+      prompt = [
+        `Insert a "Products List (Preset)" section${afterText}.`,
+        'Use a contract-based section root exactly like this:',
+        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="preset" data-cie-ref-type="bakery" data-cie-ref-name="rosenborg-bakeri" data-cie-category-id="1" data-cie-limit="8" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any" data-cie-country="NO" data-cie-lang="no"><div data-cie-products-list-mount></div></section>',
+        'Keep optional filter attributes even when empty. Do not add custom fetch logic in content.js for this section.'
+      ].join('\n');
+    }
+
+    this.draftMessage.set(prompt);
 
     setTimeout(() => {
       const ta = this.composerTextarea?.nativeElement;
@@ -1074,7 +1108,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
       const patchedHtml = this.normalizeHtml(diffResult.files.html);
       const { html: patchedHtmlWithIds } = this.ensureSectionIds(patchedHtml);
-      this.files.set({ ...diffResult.files, html: patchedHtmlWithIds });
+      const nextFiles = { ...diffResult.files, html: patchedHtmlWithIds };
+      this.files.set(nextFiles);
       this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
 
       if (logId) {
@@ -1100,8 +1135,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       // Persist to MongoDB and save version in parallel
       if (page) {
         void Promise.all([
-          this.persistToMongo({ currentFiles: diffResult.files, messages: this.messages(), patchLogs: this.patchLogs() }),
-          this.bwaiPageService.saveVersionAsync(page.id, { files: diffResult.files, diff: JSON.stringify(response.edits), status: 'applied' }).then((v) => {
+          this.persistToMongo({ currentFiles: nextFiles, messages: this.messages(), patchLogs: this.patchLogs() }),
+          this.bwaiPageService.saveVersionAsync(page.id, { files: nextFiles, diff: JSON.stringify(response.edits), status: 'applied' }).then((v) => {
             this.versions.update((vs) => [v, ...vs]);
           })
         ]);
@@ -1197,9 +1232,35 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     const container = document.createElement('div');
     container.innerHTML = this.normalizeHtml(html);
     let changed = false;
+    const usedIds = new Set<string>();
+
+    const createUniqueId = (): string => {
+      let id = '';
+      do {
+        id = 'bwai-' + Math.random().toString(36).slice(2, 10);
+      } while (usedIds.has(id));
+      usedIds.add(id);
+      return id;
+    };
+
     Array.from(container.children).forEach((child) => {
-      if (!child.getAttribute('data-bwai-id')) {
-        child.setAttribute('data-bwai-id', 'bwai-' + Math.random().toString(36).slice(2, 10));
+      const existingDataId = (child.getAttribute('data-bwai-id') ?? '').trim();
+      const existingHtmlId = (child.getAttribute('id') ?? '').trim();
+
+      let bwaiId = existingDataId || existingHtmlId;
+      if (!bwaiId || usedIds.has(bwaiId)) {
+        bwaiId = createUniqueId();
+      } else {
+        usedIds.add(bwaiId);
+      }
+
+      if (existingDataId !== bwaiId) {
+        child.setAttribute('data-bwai-id', bwaiId);
+        changed = true;
+      }
+
+      if (!existingHtmlId) {
+        child.setAttribute('id', bwaiId);
         changed = true;
       }
     });
@@ -1349,7 +1410,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         var toolbarOrigPos = '';
         var insertMenu = null;
 
-        var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form'];
+        var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form','Products List (Request)','Products List (Preset)'];
 
         /* ── helpers ── */
         function getCleanOuterHtml(el) {
@@ -1369,6 +1430,41 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           return (node && node.parentElement === root) ? node : null;
         }
 
+        function randomBwaiId() {
+          return 'bwai-' + Math.random().toString(36).slice(2, 10);
+        }
+
+        function ensureSectionId(el) {
+          if (!el || !(el instanceof Element)) return '';
+          var existingData = (el.getAttribute('data-bwai-id') || '').trim();
+          var existingId = (el.getAttribute('id') || '').trim();
+          var chosen = existingData || existingId;
+
+          if (!chosen) {
+            do {
+              chosen = randomBwaiId();
+            } while (document.querySelector('[data-bwai-id="' + chosen + '"]') || document.getElementById(chosen));
+          }
+
+          if (el.getAttribute('data-bwai-id') !== chosen) {
+            el.setAttribute('data-bwai-id', chosen);
+          }
+          if (!el.getAttribute('id')) {
+            el.setAttribute('id', chosen);
+          }
+
+          return chosen;
+        }
+
+        function ensureAllSectionIds() {
+          var root = document.getElementById('EditableContentRoot');
+          if (!root) return;
+          var children = root.children || [];
+          for (var i = 0; i < children.length; i++) {
+            ensureSectionId(children[i]);
+          }
+        }
+
         function clearClass(cls) {
           var els = document.querySelectorAll('.' + cls);
           for (var i = 0; i < els.length; i++) els[i].classList.remove(cls);
@@ -1381,7 +1477,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var rawClasses = (el.className || '').replace(/bwai-\\S*/g, '').trim().split(/\\s+/);
           var firstClass = rawClasses.find(function (c) { return c.length > 0; }) || '';
           var selector = firstClass ? ('.' + firstClass) : ('section:nth-child(' + (idx + 1) + ')');
-          var bwaiId = el.getAttribute('data-bwai-id') || '';
+          var bwaiId = ensureSectionId(el);
           return { idx: idx, total: siblings.length, selector: selector, bwaiId: bwaiId };
         }
 
@@ -1520,7 +1616,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
             // Copy ID is handled locally — no postMessage needed
             if (action === 'copy-id') {
-              var secId = toolbarSection ? (toolbarSection.getAttribute('data-bwai-id') || '') : '';
+              var secId = toolbarSection ? ensureSectionId(toolbarSection) : '';
               if (navigator.clipboard) { navigator.clipboard.writeText(secId).catch(function() {}); }
               b.innerHTML = IC_CHECK + '<span>Copied!</span>';
               setTimeout(function() { b.innerHTML = IC_COPY + '<span>Copy ID</span>'; }, 1500);
@@ -1572,11 +1668,27 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           }
 
           if (d.type === 'bwai-patch') {
+            if (d.productsRuntime != null) {
+              var runtimeText = String(d.productsRuntime);
+              var runtimeScript = document.getElementById('CieProductsListRuntime');
+              var runtimeChanged = !runtimeScript || runtimeScript.textContent !== runtimeText;
+              if (runtimeChanged) {
+                if (runtimeScript) runtimeScript.remove();
+                runtimeScript = document.createElement('script');
+                runtimeScript.id = 'CieProductsListRuntime';
+                runtimeScript.textContent = runtimeText;
+                document.body.appendChild(runtimeScript);
+              }
+            }
+
             var styleEl = document.getElementById('BuildWithAiContentStyle');
             if (styleEl && d.css != null) styleEl.textContent = d.css;
 
             var root2 = document.getElementById('EditableContentRoot');
-            if (root2 && d.html != null) root2.innerHTML = d.html;
+            if (root2 && d.html != null) {
+              root2.innerHTML = d.html;
+              ensureAllSectionIds();
+            }
 
             var oldScript = document.getElementById('BuildWithAiContentScript');
             var jsContent = d.js != null ? d.js : (oldScript ? oldScript.textContent : '');
@@ -1586,6 +1698,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
               newScript.id = 'BuildWithAiContentScript';
               newScript.textContent = jsContent;
               document.body.appendChild(newScript);
+            }
+
+            if (window.CIEProductsListRuntime && typeof window.CIEProductsListRuntime.hydrate === 'function') {
+              window.CIEProductsListRuntime.hydrate(document);
             }
           }
 
@@ -1650,6 +1766,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           '.bwai-insert-custom{color:#888!important;font-style:italic}'
         ].join('');
         document.head.appendChild(style);
+
+        ensureAllSectionIds();
       })();
     </script>
 
@@ -1868,6 +1986,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       })();
     </script>
 
+    <script id="CieProductsListRuntime">${BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT}</script>
     <script id="BuildWithAiContentScript">${safeJs}</script>
   </body>
 </html>`;

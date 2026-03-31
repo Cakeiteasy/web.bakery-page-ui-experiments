@@ -1428,6 +1428,706 @@ export const FOOTER_HTML = `<footer id="PageFooter" class="footer">
   </div>
 </footer>`;
 
+export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
+  var GLOBAL_KEY = 'CIEProductsListRuntime';
+  var STATE_KEY = '__cieProductsListState';
+  var COMPONENT_SELECTOR = '[data-cie-component="products-list"]';
+  var BASE_URL = 'https://api.cakeiteasy.no/api/store';
+  var HEADER_NAME = 'x-source-header';
+  var HEADER_VALUE = 'MARKETPLACE';
+  var STYLE_ID = 'CieProductsListRuntimeStyle';
+
+  function escHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function parsePositiveNumber(value, fallback) {
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.round(parsed);
+  }
+
+  function parseNonNegativeNumber(value, fallback) {
+    var parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+    return Math.round(parsed);
+  }
+
+  function parseIdList(value) {
+    if (!value) return [];
+    return String(value)
+      .split(',')
+      .map(function (part) { return Number(part.trim()); })
+      .filter(function (num, index, all) { return Number.isFinite(num) && num > 0 && all.indexOf(num) === index; });
+  }
+
+  function normalizeMode(value) {
+    return value === 'request' ? 'request' : 'preset';
+  }
+
+  function normalizeRefType(value) {
+    return value === 'bakery' ? 'bakery' : 'city';
+  }
+
+  function normalizeMotive(value) {
+    if (value === 'with' || value === 'without') return value;
+    return 'any';
+  }
+
+  function toCategoryList(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (payload && typeof payload === 'object' && Array.isArray(payload.results)) return payload.results;
+    return [];
+  }
+
+  function buildUrl(path, params) {
+    var url = new URL(BASE_URL + path);
+    Object.keys(params || {}).forEach(function (key) {
+      var value = params[key];
+      if (value === undefined || value === null || value === '') return;
+      if (Array.isArray(value)) {
+        value.forEach(function (item) {
+          if (item !== undefined && item !== null && item !== '') {
+            url.searchParams.append(key, String(item));
+          }
+        });
+        return;
+      }
+      url.searchParams.set(key, String(value));
+    });
+    return url.toString();
+  }
+
+  async function requestJson(path, params) {
+    var response = await fetch(buildUrl(path, params), {
+      headers: (function () {
+        var headers = {};
+        headers[HEADER_NAME] = HEADER_VALUE;
+        return headers;
+      })()
+    });
+
+    if (!response.ok) {
+      var text = await response.text();
+      throw new Error('Products List API request failed (' + response.status + '): ' + text.slice(0, 140));
+    }
+
+    return response.json();
+  }
+
+  function ensureStyles(doc) {
+    var styleText = [
+      '.cie-products-list-shell,.cie-products-list{--ciepl-surface:var(--lp-white,var(--cie-primary-bg,#fff));--ciepl-surface-soft:var(--lp-cream,var(--cie-secondary-bg,#f9f9f9));--ciepl-surface-muted:var(--lp-warm,var(--cie-section-bg,#f7f3f0));--ciepl-border:var(--lp-border,var(--cie-border,#ebebeb));--ciepl-text:var(--lp-text,var(--cie-text,#333));--ciepl-muted:var(--lp-muted,var(--cie-muted,#858585));--ciepl-accent:var(--lp-primary,var(--cie-accent,#ff3399));--ciepl-accent-soft:var(--lp-primary-soft,var(--cie-accent-soft,#ffc2e0));--ciepl-accent-faint:var(--lp-primary-faint,#fff0f7);font-family:var(--lp-sans, "Lato", sans-serif);color:var(--ciepl-text);}',
+      '.cie-products-list{margin:0 auto;max-width:980px;border:1px solid var(--ciepl-border);border-radius:18px;background:var(--ciepl-surface);padding:18px;box-shadow:0 2px 12px rgba(51,51,51,.08);}',
+      '.cie-products-list__head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;}',
+      '.cie-products-list__title{margin:0;font-size:1.12rem;line-height:1.2;color:var(--ciepl-text);font-family:var(--lp-serif, "Playfair Display", serif);}',
+      '.cie-products-list__sub{margin:0;color:var(--ciepl-muted);font-size:.84rem;}',
+      '.cie-products-list__search-area{position:relative;max-width:640px;margin:0 auto 24px;}',
+      '.cie-products-list__search-shell{position:relative;}',
+      '.cie-products-list__input{width:100%;height:56px;min-height:0;line-height:1.2;padding:.72rem 1rem;border:1px solid var(--ciepl-border);border-radius:999px;background:var(--ciepl-surface);color:var(--ciepl-text);font:inherit;box-sizing:border-box;appearance:none;-webkit-appearance:none;box-shadow:0 1px 0 rgba(51,51,51,.04);}',
+      '.cie-products-list__input:focus{outline:none;border-color:var(--ciepl-accent-soft);box-shadow:0 0 0 2px var(--ciepl-accent-soft);}',
+      '.cie-products-list__dropdown{position:absolute;left:0;right:0;top:calc(100% + 8px);z-index:8;list-style:none;margin:0;padding:6px;border:1px solid var(--ciepl-border);border-radius:14px;background:var(--ciepl-surface);box-shadow:0 12px 30px rgba(51,51,51,.14);max-height:240px;overflow:auto;}',
+      '.cie-products-list__dropdown-item{width:100%;display:flex;justify-content:space-between;align-items:center;gap:10px;border:none;background:transparent;padding:.62rem .7rem;border-radius:10px;color:var(--ciepl-text);font:inherit;cursor:pointer;text-align:left;}',
+      '.cie-products-list__dropdown-item:hover{background:var(--ciepl-accent-faint);}',
+      '.cie-products-list__dropdown-type{font-size:.74rem;line-height:1;color:var(--ciepl-muted);text-transform:capitalize;}',
+      '.cie-products-list__tabs{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:0 0 14px;}',
+      '.cie-products-list__tab{border:1px solid var(--ciepl-border);background:var(--ciepl-surface);color:var(--ciepl-text);border-radius:999px;padding:.42rem .82rem;font:inherit;font-size:.82rem;cursor:pointer;transition:all .18s ease;}',
+      '.cie-products-list__tab:hover{background:var(--ciepl-accent-faint);border-color:var(--ciepl-accent-soft);}',
+      '.cie-products-list__tab.is-active{background:var(--ciepl-accent);border-color:var(--ciepl-accent);color:var(--ciepl-surface);font-weight:700;}',
+      '.cie-products-list__status{font-size:.84rem;color:var(--ciepl-muted);margin:0 0 10px;text-align:center;}',
+      '.cie-products-list__status.error{color:var(--ciepl-accent);}',
+      '.cie-products-list__results{position:relative;min-height:70px;}',
+      '.cie-products-list__content.is-blurred{filter:blur(2px);opacity:.58;pointer-events:none;user-select:none;}',
+      '.cie-products-list__loading-overlay{position:absolute;inset:0;display:flex;justify-content:center;align-items:flex-start;padding-top:16px;border-radius:12px;background:rgba(255,255,255,.32);pointer-events:none;}',
+      '.cie-products-list__loading-pill{display:inline-flex;align-items:center;padding:.35rem .75rem;border-radius:999px;border:1px solid var(--ciepl-accent-soft);background:var(--ciepl-accent-faint);color:var(--ciepl-accent);font-size:.8rem;font-weight:700;box-shadow:0 2px 8px rgba(51,51,51,.10);}',
+      '.cie-products-list__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0;padding:0;list-style:none;}',
+      '.cie-products-list__card{border:1px solid var(--ciepl-border);border-radius:12px;padding:10px;display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px;align-items:start;background:var(--ciepl-surface);}',
+      '.cie-products-list__card.is-clickable{cursor:pointer;transition:transform .12s ease,border-color .12s ease,box-shadow .12s ease;}',
+      '.cie-products-list__card.is-clickable:hover{transform:translateY(-1px);border-color:var(--ciepl-accent-soft);box-shadow:0 4px 14px rgba(51,51,51,.12);}',
+      '.cie-products-list__card.is-clickable:focus-visible{outline:2px solid var(--ciepl-accent-soft);outline-offset:1px;}',
+      '.cie-products-list__image{width:72px;height:72px;object-fit:cover;border-radius:10px;background:var(--ciepl-surface-muted);}',
+      '.cie-products-list__name{margin:0;font-size:.95rem;line-height:1.3;color:var(--ciepl-text);}',
+      '.cie-products-list__meta{margin:3px 0 0;font-size:.78rem;color:var(--ciepl-muted);}',
+      '.cie-products-list__price{margin-top:5px;font-size:.83rem;font-weight:700;color:var(--ciepl-text);}',
+      '.cie-products-list__skeleton-card{border:1px solid var(--ciepl-border);border-radius:12px;padding:10px;display:grid;grid-template-columns:72px minmax(0,1fr);gap:10px;background:var(--ciepl-surface);}',
+      '.cie-products-list__skeleton-image{width:72px;height:72px;border-radius:10px;background:var(--ciepl-surface-muted);animation:cieProductsSkeletonPulse 1.25s ease-in-out infinite;}',
+      '.cie-products-list__skeleton-line{height:11px;border-radius:999px;background:var(--ciepl-surface-muted);animation:cieProductsSkeletonPulse 1.25s ease-in-out infinite;}',
+      '.cie-products-list__skeleton-line + .cie-products-list__skeleton-line{margin-top:8px;}',
+      '.cie-products-list__skeleton-line--short{width:62%;}',
+      '.cie-products-list__skeleton-line--mid{width:78%;}',
+      '@keyframes cieProductsSkeletonPulse{0%{opacity:.48;}50%{opacity:.92;}100%{opacity:.48;}}',
+      '.cie-products-list__empty{padding:14px;border:1px dashed var(--ciepl-border);border-radius:12px;color:var(--ciepl-muted);font-size:.86rem;background:var(--ciepl-surface-soft);}',
+      '@media (max-width:1024px){.cie-products-list__grid{grid-template-columns:repeat(2,minmax(0,1fr));}}',
+      '@media (max-width:760px){.cie-products-list{padding:14px;}.cie-products-list__search-area{max-width:none;margin-bottom:18px;}.cie-products-list__grid{grid-template-columns:1fr;}}'
+    ].join('');
+
+    var style = doc.getElementById(STYLE_ID);
+    if (!style) {
+      style = doc.createElement('style');
+      style.id = STYLE_ID;
+      doc.head.appendChild(style);
+    }
+
+    if (style.textContent !== styleText) {
+      style.textContent = styleText;
+    }
+  }
+
+  function resolveConfig(root) {
+    return {
+      mode: normalizeMode(root.getAttribute('data-cie-mode')),
+      refType: normalizeRefType(root.getAttribute('data-cie-ref-type')),
+      refName: (root.getAttribute('data-cie-ref-name') || '').trim(),
+      bakeryId: parsePositiveNumber(root.getAttribute('data-cie-bakery-id'), null),
+      categoryId: parsePositiveNumber(root.getAttribute('data-cie-category-id'), null),
+      country: (root.getAttribute('data-cie-country') || 'NO').trim() || 'NO',
+      lang: (root.getAttribute('data-cie-lang') || 'no').trim() || 'no',
+      limit: parsePositiveNumber(root.getAttribute('data-cie-limit'), 8),
+      allergenIds: parseIdList(root.getAttribute('data-cie-allergen-ids')),
+      groupIds: parseIdList(root.getAttribute('data-cie-group-ids')),
+      motive: normalizeMotive(root.getAttribute('data-cie-motive'))
+    };
+  }
+
+  function ensureMount(root) {
+    var mount = root.querySelector('[data-cie-products-list-mount]');
+    if (mount) return mount;
+    mount = root.ownerDocument.createElement('div');
+    mount.setAttribute('data-cie-products-list-mount', '');
+    root.appendChild(mount);
+    return mount;
+  }
+
+  function deriveRef(state) {
+    if (state.selectedBakeryId) {
+      return { bakeryId: state.selectedBakeryId, refName: state.selectedRefName || '', refType: 'bakery' };
+    }
+    if (state.selectedRefName) {
+      return { bakeryId: null, refName: state.selectedRefName, refType: state.selectedRefType || 'city' };
+    }
+    return null;
+  }
+
+  async function fetchCategories(state) {
+    var ref = deriveRef(state);
+    if (!ref) return [];
+
+    if (ref.bakeryId) {
+      var byBakeryId = await requestJson('/bakeries/' + encodeURIComponent(ref.bakeryId) + '/categories/', {
+        country_code: state.config.country,
+        selected_lang: state.config.lang
+      });
+      return toCategoryList(byBakeryId);
+    }
+
+    var byRef = await requestJson('/' + encodeURIComponent(ref.refName) + '/categories/', {
+      country_code: state.config.country,
+      selected_lang: state.config.lang
+    });
+    return toCategoryList(byRef);
+  }
+
+  function buildCommonParams(state) {
+    var ref = deriveRef(state);
+    if (!ref || !state.selectedCategoryId) return null;
+
+    var params = {
+      country: state.config.country,
+      category_id: state.selectedCategoryId
+    };
+
+    if (ref.bakeryId) params.bakery_id = ref.bakeryId;
+    else params.ref_name = ref.refName;
+
+    return params;
+  }
+
+  function formatPrice(minPrice, maxPrice) {
+    var min = Number(minPrice);
+    var max = Number(maxPrice);
+    if (!Number.isFinite(min) && !Number.isFinite(max)) return '';
+    if (Number.isFinite(min) && Number.isFinite(max) && min !== max) return String(min) + ' - ' + String(max) + ' kr';
+    return String(Number.isFinite(min) ? min : max) + ' kr';
+  }
+
+  function slugify(value) {
+    var text = String(value || '').trim().toLowerCase();
+    if (!text) return '';
+    text = text
+      .replace(/æ/g, 'ae')
+      .replace(/ø/g, 'o')
+      .replace(/å/g, 'a');
+    if (typeof text.normalize === 'function') {
+      text = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+    return text
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function toAbsoluteCakeUrl(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    var lower = raw.toLowerCase();
+    if (lower.indexOf('http://') === 0 || lower.indexOf('https://') === 0) return raw;
+    if (raw.charAt(0) === '/') return 'https://www.cakeiteasy.no' + raw;
+    return '';
+  }
+
+  function getProductUrl(product) {
+    var explicitUrl = toAbsoluteCakeUrl(
+      (product && (product.url || product.product_url || product.detail_url || product.request_url)) ||
+      (product && product.bakery && (product.bakery.url || product.bakery.webshop_url))
+    );
+    if (explicitUrl) return explicitUrl;
+
+    var productId = parsePositiveNumber(product && product.id, null);
+    var bakerySlug = slugify(product && product.bakery && product.bakery.name);
+    var productSlug = slugify(product && product.name);
+    if (!productId || !bakerySlug || !productSlug) return '';
+    return 'https://www.cakeiteasy.no/' + bakerySlug + '/produkt/' + productSlug + '-' + productId;
+  }
+
+  function buildProductsSkeletonMarkup(state) {
+    var count = parsePositiveNumber(state && state.config ? state.config.limit : null, 6);
+    count = Math.max(3, Math.min(6, count));
+    var cards = '';
+
+    for (var i = 0; i < count; i++) {
+      cards += [
+        '<li class="cie-products-list__skeleton-card">',
+        '<div class="cie-products-list__skeleton-image"></div>',
+        '<div>',
+        '<div class="cie-products-list__skeleton-line"></div>',
+        '<div class="cie-products-list__skeleton-line cie-products-list__skeleton-line--mid"></div>',
+        '<div class="cie-products-list__skeleton-line cie-products-list__skeleton-line--short"></div>',
+        '</div>',
+        '</li>'
+      ].join('');
+    }
+
+    return '<ul class="cie-products-list__grid">' + cards + '</ul>';
+  }
+
+  async function loadProductsData(state) {
+    var common = buildCommonParams(state);
+    if (!common) {
+      state.error = 'Missing location or category for Products List.';
+      state.loading = false;
+      render(state);
+      return;
+    }
+
+    state.loading = true;
+    state.hasResolvedProductRequest = false;
+    state.error = '';
+    render(state);
+
+    try {
+      var filtersPromise = requestJson('/product-types/filters/', common);
+      var allergensPromise = requestJson('/product-types/filters/allergens/', common);
+
+      var productParams = {
+        country: common.country,
+        category_id: common.category_id
+      };
+      if (common.ref_name) productParams.ref_name = common.ref_name;
+      if (common.bakery_id) productParams.bakery_id = common.bakery_id;
+      if (state.config.allergenIds.length) productParams.allergen = state.config.allergenIds;
+      if (state.config.groupIds.length) productParams.group = state.config.groupIds;
+      if (state.config.motive === 'with') productParams.has_motive = 'true';
+      if (state.config.motive === 'without') productParams.has_motive = 'false';
+
+      var productsPromise = requestJson('/product-types/', productParams);
+      var result = await Promise.all([filtersPromise, allergensPromise, productsPromise]);
+      state.filters = result[0] || null;
+      state.allergens = Array.isArray(result[1]) ? result[1] : [];
+      state.products = Array.isArray(result[2]) ? result[2].slice(0, state.config.limit) : [];
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : 'Failed to load products.';
+      state.products = [];
+    } finally {
+      state.loading = false;
+      state.hasResolvedProductRequest = true;
+      render(state);
+    }
+  }
+
+  async function searchKeywords(state, query) {
+    state.query = query;
+    state.keywordResults = [];
+
+    if (!query || query.trim().length < 2) {
+      render(state);
+      return;
+    }
+
+    try {
+      var payload = await requestJson('/keywords/', {
+        country_code: state.config.country,
+        query: query.trim()
+      });
+      state.keywordResults = Array.isArray(payload) ? payload.slice(0, 8) : [];
+    } catch (_error) {
+      state.keywordResults = [];
+    }
+
+    render(state);
+  }
+
+  async function selectKeyword(state, keyword) {
+    state.selectedRefType = keyword && keyword.is_city ? 'city' : 'bakery';
+    state.selectedRefName = String(keyword && keyword.name ? keyword.name : '').trim();
+    state.selectedBakeryId = keyword && keyword.is_city ? null : parsePositiveNumber(keyword && keyword.id, null);
+    state.selectedCategoryId = null;
+    state.categories = [];
+    state.keywordResults = [];
+    state.query = state.selectedRefName;
+    state.error = '';
+    render(state);
+
+    try {
+      state.categories = await fetchCategories(state);
+      if (!state.selectedCategoryId && state.categories.length) {
+        state.selectedCategoryId = parsePositiveNumber(state.categories[0] && state.categories[0].id, null);
+      }
+      render(state);
+      if (state.selectedCategoryId) {
+        await loadProductsData(state);
+      }
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : 'Failed to load categories.';
+      render(state);
+    }
+  }
+
+  function render(state) {
+    var mount = state.mount;
+    var doc = mount && mount.ownerDocument ? mount.ownerDocument : document;
+    var previousSearchInput = mount.querySelector('[data-cie-pl-search]');
+    var shouldRestoreSearchFocus = !!(previousSearchInput && doc.activeElement === previousSearchInput);
+    var previousSelectionStart = shouldRestoreSearchFocus && typeof previousSearchInput.selectionStart === 'number'
+      ? previousSearchInput.selectionStart
+      : null;
+    var previousSelectionEnd = shouldRestoreSearchFocus && typeof previousSearchInput.selectionEnd === 'number'
+      ? previousSearchInput.selectionEnd
+      : null;
+
+    var searchMarkup = '';
+    if (state.config.mode === 'request') {
+      searchMarkup = [
+        '<div class="cie-products-list__search-area">',
+        '<div class="cie-products-list__search-shell">',
+        '<input class="cie-products-list__input" type="text" autocomplete="off" placeholder="Search city or bakery" value="' + escHtml(state.query) + '" data-cie-pl-search />',
+        state.keywordResults.length
+          ? '<ul class="cie-products-list__dropdown">' + state.keywordResults.map(function (item, index) {
+              var typeLabel = item && item.is_city ? 'city' : 'bakery';
+              return '<li><button type="button" class="cie-products-list__dropdown-item" data-cie-pl-suggestion="' + index + '">' +
+                '<span>' + escHtml(item && item.name ? item.name : 'Unknown') + '</span>' +
+                '<span class="cie-products-list__dropdown-type">' + typeLabel + '</span>' +
+                '</button></li>';
+            }).join('') + '</ul>'
+          : '',
+        '</div>',
+        '</div>'
+      ].join('');
+    }
+
+    var tabsMarkup = '';
+    if (state.categories.length) {
+      tabsMarkup = '<div class="cie-products-list__tabs">' + state.categories.map(function (category) {
+        var id = parsePositiveNumber(category && category.id, null);
+        if (!id) return '';
+        var isActive = id === state.selectedCategoryId ? ' is-active' : '';
+        var name = category && category.name ? category.name : 'Category';
+        return '<button type="button" class="cie-products-list__tab' + isActive + '" data-cie-pl-tab="' + id + '">' + escHtml(name) + '</button>';
+      }).join('') + '</div>';
+    }
+
+    var productsMarkup = '';
+    var shouldShowSkeleton =
+      state.initializing ||
+      (state.loading && !state.products.length) ||
+      (!state.hasResolvedProductRequest && !state.error && (state.config.mode === 'preset' || state.selectedRefName || state.selectedBakeryId));
+
+    if (state.products.length) {
+      productsMarkup =
+        '<ul class="cie-products-list__grid">' +
+        state.products.map(function (product) {
+          var name = escHtml(product && product.name ? product.name : 'Unnamed product');
+          var bakeryName = escHtml(product && product.bakery && product.bakery.name ? product.bakery.name : '');
+          var productUrl = getProductUrl(product);
+          var cardClasses = 'cie-products-list__card' + (productUrl ? ' is-clickable' : '');
+          var linkAttrs = productUrl
+            ? ' data-cie-pl-product-url="' + escHtml(productUrl) + '" role="link" tabindex="0"'
+            : '';
+          var imageUrl = product && product.image && (product.image.small || product.image.original)
+            ? String(product.image.small || product.image.original)
+            : '';
+          if (imageUrl && imageUrl.indexOf('//') === 0) imageUrl = 'https:' + imageUrl;
+          var priceLabel = formatPrice(product && product.min_price, product && product.max_price);
+
+          return [
+            '<li class="' + cardClasses + '"' + linkAttrs + '>',
+            imageUrl ? '<img class="cie-products-list__image" src="' + escHtml(imageUrl) + '" alt="' + name + '" loading="lazy" />' : '<div class="cie-products-list__image"></div>',
+            '<div>',
+            '<h4 class="cie-products-list__name">' + name + '</h4>',
+            bakeryName ? '<p class="cie-products-list__meta">' + bakeryName + '</p>' : '',
+            priceLabel ? '<p class="cie-products-list__price">' + escHtml(priceLabel) + '</p>' : '',
+            '</div>',
+            '</li>'
+          ].join('');
+        }).join('') +
+        '</ul>';
+    } else if (shouldShowSkeleton) {
+      productsMarkup = buildProductsSkeletonMarkup(state);
+    } else if (!state.loading && !state.error && state.config.mode === 'request' && !state.selectedRefName && !state.selectedBakeryId) {
+      productsMarkup = '<div class="cie-products-list__empty">Search for a city or bakery to see products.</div>';
+    } else if (!state.loading && !state.error) {
+      productsMarkup = '<div class="cie-products-list__empty">No products found for this selection.</div>';
+    }
+
+    var showLoadingOverlay = state.loading && state.products.length > 0;
+    var contentClass = showLoadingOverlay ? 'cie-products-list__content is-blurred' : 'cie-products-list__content';
+
+    mount.innerHTML = [
+      '<div class="cie-products-list-shell">',
+      searchMarkup,
+      '<div class="cie-products-list">',
+      tabsMarkup,
+      state.error ? '<p class="cie-products-list__status error">' + escHtml(state.error) + '</p>' : '',
+      '<div class="cie-products-list__results">',
+      '<div class="' + contentClass + '">',
+      productsMarkup,
+      '</div>',
+      showLoadingOverlay
+        ? '<div class="cie-products-list__loading-overlay"><span class="cie-products-list__loading-pill">Loading products...</span></div>'
+        : '',
+      '</div>',
+      '</div>',
+      '</div>'
+    ].join('');
+
+    var searchInput = mount.querySelector('[data-cie-pl-search]');
+    if (searchInput) {
+      var searchTimeout = null;
+
+      if (shouldRestoreSearchFocus) {
+        try {
+          searchInput.focus({ preventScroll: true });
+        } catch (_focusErr) {
+          searchInput.focus();
+        }
+        var cursorStart = typeof previousSelectionStart === 'number'
+          ? Math.min(previousSelectionStart, searchInput.value.length)
+          : searchInput.value.length;
+        var cursorEnd = typeof previousSelectionEnd === 'number'
+          ? Math.min(previousSelectionEnd, searchInput.value.length)
+          : cursorStart;
+        if (typeof searchInput.setSelectionRange === 'function') {
+          try {
+            searchInput.setSelectionRange(cursorStart, cursorEnd);
+          } catch (_selectionErr) {
+            // noop
+          }
+        }
+      }
+
+      searchInput.addEventListener('input', function (event) {
+        var value = event && event.target ? event.target.value : '';
+        if (searchTimeout) window.clearTimeout(searchTimeout);
+        searchTimeout = window.setTimeout(function () {
+          void searchKeywords(state, value);
+        }, 180);
+      });
+      searchInput.addEventListener('keydown', function (event) {
+        if (!event || event.key !== 'Enter' || !state.keywordResults.length) return;
+        event.preventDefault();
+        void selectKeyword(state, state.keywordResults[0]);
+      });
+      searchInput.addEventListener('blur', function () {
+        window.setTimeout(function () {
+          var active = doc.activeElement;
+          if (active && typeof active.closest === 'function' && active.closest('.cie-products-list__search-area')) {
+            return;
+          }
+          if (!state.keywordResults.length) return;
+          state.keywordResults = [];
+          render(state);
+        }, 120);
+      });
+    }
+
+    var categoryTabs = mount.querySelectorAll('[data-cie-pl-tab]');
+    categoryTabs.forEach(function (button) {
+      button.addEventListener('click', function () {
+        var categoryId = parsePositiveNumber(button.getAttribute('data-cie-pl-tab'), null);
+        if (!categoryId || categoryId === state.selectedCategoryId) return;
+        state.selectedCategoryId = categoryId;
+        void loadProductsData(state);
+      });
+    });
+
+    var suggestionButtons = mount.querySelectorAll('[data-cie-pl-suggestion]');
+    suggestionButtons.forEach(function (button) {
+      var pickSuggestion = function () {
+        var index = parseNonNegativeNumber(button.getAttribute('data-cie-pl-suggestion'), null);
+        if (index === null || !state.keywordResults[index]) return;
+        var keyword = state.keywordResults[index];
+        state.keywordResults = [];
+        void selectKeyword(state, keyword);
+      };
+
+      var onPointerPick = function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        button.setAttribute('data-cie-pl-picked-by-pointer', '1');
+        pickSuggestion();
+      };
+
+      if (typeof window !== 'undefined' && window.PointerEvent) {
+        button.addEventListener('pointerdown', onPointerPick);
+      } else {
+        button.addEventListener('mousedown', onPointerPick);
+      }
+
+      button.addEventListener('click', function (event) {
+        event.preventDefault();
+        // When pointerdown already handled the selection, ignore the synthetic click.
+        if (button.getAttribute('data-cie-pl-picked-by-pointer') === '1') {
+          button.removeAttribute('data-cie-pl-picked-by-pointer');
+          return;
+        }
+        pickSuggestion();
+      });
+    });
+
+    var productCards = mount.querySelectorAll('[data-cie-pl-product-url]');
+    productCards.forEach(function (card) {
+      var url = card.getAttribute('data-cie-pl-product-url');
+      if (!url) return;
+
+      var openProduct = function () {
+        window.open(url, '_blank', 'noopener');
+      };
+
+      card.addEventListener('click', function (event) {
+        var target = event && event.target;
+        if (target && typeof target.closest === 'function' && target.closest('a,button,input,select,textarea,label')) {
+          return;
+        }
+        openProduct();
+      });
+
+      card.addEventListener('keydown', function (event) {
+        if (!event) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openProduct();
+        }
+      });
+    });
+  }
+
+  async function initSection(root) {
+    if (root.getAttribute('data-cie-products-list-init') === '1') {
+      var existingState = root[STATE_KEY];
+      if (existingState) {
+        existingState.root = root;
+        existingState.mount = ensureMount(root);
+        existingState.config = resolveConfig(root);
+        render(existingState);
+        return;
+      }
+      // Legacy runtime sections may carry init flag without an attached state object.
+      // Drop the flag and re-initialize with the current renderer.
+      root.removeAttribute('data-cie-products-list-init');
+    }
+    root.setAttribute('data-cie-products-list-init', '1');
+
+    var config = resolveConfig(root);
+    var state = {
+      root: root,
+      mount: ensureMount(root),
+      config: config,
+      loading: false,
+      initializing: true,
+      hasResolvedProductRequest: false,
+      error: '',
+      products: [],
+      categories: [],
+      filters: null,
+      allergens: [],
+      query: '',
+      keywordResults: [],
+      selectedRefType: config.refType,
+      selectedRefName: config.refName || '',
+      selectedBakeryId: config.bakeryId,
+      selectedCategoryId: config.categoryId
+    };
+    root[STATE_KEY] = state;
+
+    if (config.mode === 'preset' && !config.refName && !config.bakeryId) {
+      state.initializing = false;
+      state.error = 'Products List preset mode requires data-cie-ref-name or data-cie-bakery-id.';
+      render(state);
+      return;
+    }
+
+    if (!state.selectedCategoryId && config.mode === 'preset') {
+      state.initializing = false;
+      state.error = 'Products List preset mode requires data-cie-category-id.';
+      render(state);
+      return;
+    }
+
+    render(state);
+
+    try {
+      if (state.selectedRefName || state.selectedBakeryId) {
+        state.categories = await fetchCategories(state);
+        if (!state.selectedCategoryId && state.categories.length) {
+          state.selectedCategoryId = parsePositiveNumber(state.categories[0] && state.categories[0].id, null);
+        }
+      }
+      render(state);
+      if (state.selectedCategoryId && (state.selectedRefName || state.selectedBakeryId)) {
+        await loadProductsData(state);
+      }
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : 'Failed to initialize Products List.';
+      render(state);
+    } finally {
+      state.initializing = false;
+      render(state);
+    }
+  }
+
+  function hydrate(root) {
+    var host = root && root.querySelectorAll ? root : document;
+    ensureStyles(document);
+    var sections = host.querySelectorAll(COMPONENT_SELECTOR);
+    sections.forEach(function (section) {
+      void initSection(section);
+    });
+  }
+
+  window[GLOBAL_KEY] = { hydrate: hydrate };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      hydrate(document);
+    });
+  } else {
+    hydrate(document);
+  }
+})();`;
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -1500,6 +2200,7 @@ export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}, 
       })();
     </script>
 
+    <script id="CieProductsListRuntime">${PRODUCTS_LIST_RUNTIME_SCRIPT}</script>
     <script id="BuildWithAiContentScript">${safeJs}</script>
   </body>
 </html>`;
