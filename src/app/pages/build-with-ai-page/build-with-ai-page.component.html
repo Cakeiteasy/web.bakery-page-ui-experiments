@@ -174,6 +174,11 @@
             [class.message--assistant]="message.role === 'assistant'"
             [class.message--error]="message.errorCategory"
           >
+            <p class="message__target" *ngIf="message.role === 'user' && message.target">
+              <span class="message__target-key">Target:</span>
+              <span class="message__target-value">{{ message.target.label }}</span>
+              <span class="message__target-ref" *ngIf="message.target.reference">{{ message.target.reference }}</span>
+            </p>
             <p class="message__text">{{ message.text }}</p>
 
             <ul class="message__attachments" *ngIf="message.attachments.length">

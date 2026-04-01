@@ -1,7 +1,7 @@
 /* Scroll entrance */
 (function () {
   var els = document.querySelectorAll(
-    '.lp-hero,.lp-trust,.lp-stats-bar,.lp-props,.lp-how,.lp-showcase,.lp-proof,.lp-guarantee,.lp-faq,.lp-cta-final'
+    '.lp-hero,.lp-trust,.lp-stats-bar,.lp-props,.lp-how,.lp-showcase,.lp-proof,.lp-guarantee,.lp-faq,.lp-cta-final,.lp-products-list'
   );
   if (!('IntersectionObserver' in window)) {
     els.forEach(function (el) { el.classList.add('in-view'); });

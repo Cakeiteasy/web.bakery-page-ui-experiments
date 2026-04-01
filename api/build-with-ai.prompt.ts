@@ -13,6 +13,7 @@ Structure constraints:
 - DO NOT add <header>, <nav>, navbar, or <footer> elements — they already exist in the shell and will create duplicates.
 - DO NOT nest <main> inside <main>. content.html should contain page body sections only (hero, cards, CTA, etc.).
 - The site navigation is already present — do not duplicate it.
+- A non-editable shell runtime already handles section reveal ('in-view') behavior for lp sections. In content.js, add only page-specific behavior and do not attempt to replace core reveal logic.
 
 Design direction:
 - Use the lp- design system already provided by the preview shell:
@@ -22,9 +23,11 @@ Design direction:
   - Layout: --lp-w (max-width container), --lp-gap (section spacing)
   - Radius tokens: --lp-r-sm, --lp-r-md, --lp-r-lg, --lp-r-xl
   - Shadow tokens: --lp-shadow, --lp-shadow-rose
-  - Section classes: .lp-hero, .lp-trust, .lp-stats-bar, .lp-props, .lp-how, .lp-showcase, .lp-proof, .lp-guarantee, .lp-faq, .lp-cta-final
+  - Section classes: .lp-hero, .lp-trust, .lp-stats-bar, .lp-props, .lp-how, .lp-showcase, .lp-proof, .lp-guarantee, .lp-faq, .lp-cta-final, .lp-products-list
 - DO NOT re-import fonts or redefine :root tokens — they are already provided by the preview shell.
-- DO NOT redefine .lp-btn or other existing utilities — extend only if needed.
+- Core LP style foundations are non-editable shell styles. Treat content.css as additive page-level custom styles by default.
+- DO NOT redefine protected global styles by default: :root, @import, .lp-btn*, .lp-eyebrow*.
+- You may modify those protected global styles only when the latest user message explicitly includes [ALLOW_STYLE_OVERRIDE].
 - Prefer meaningful sections: hero, cards, feature lists, testimonials, FAQ, metrics, CTA.
 - You may add new CSS classes beyond the design system when useful, but stay consistent with the existing tokens.
 - When overriding .lp-showcase__grid columns, always also set grid-template-rows: auto to prevent phantom empty rows inherited from the base CSS.
@@ -35,8 +38,15 @@ Products List section contract:
   - data-cie-mode="request" or "preset"
   - data-cie-ref-type="city" or "bakery"
   - data-cie-ref-name OR data-cie-bakery-id
-  - data-cie-category-id
-  - optional: data-cie-allergen-ids, data-cie-group-ids, data-cie-motive, data-cie-limit, data-cie-country, data-cie-lang
+  - data-cie-category-id (required in preset mode unless data-cie-predefined-category is set)
+  - optional: data-cie-show-search, data-cie-predefined-category, data-cie-allergen-ids, data-cie-group-ids, data-cie-motive, data-cie-limit, data-cie-country, data-cie-lang
+- Runtime behavior to preserve:
+  - data-cie-predefined-category locks the list to that category and hides category tabs.
+  - If data-cie-predefined-category does not match any category, render no products (no hard runtime error).
+  - data-cie-limit is an optional explicit cap; omitting it means show all returned products.
+- Runtime layout hooks available for styling:
+  - Classes: .cie-products-list-shell, .cie-products-list, .cie-products-list__search-area, .cie-products-list__tabs, .cie-products-list__grid, .cie-products-list__card, .cie-products-list__empty, .cie-products-list__status
+  - CSS vars: --ciepl-surface, --ciepl-surface-soft, --ciepl-surface-muted, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint
 - Prefer adding <div data-cie-products-list-mount></div> inside the section root so the runtime has a stable mount node.
 - Do NOT implement custom API calls in content.js for this component. The shared runtime handles requests and sends x-source-header=MARKETPLACE automatically.
 - Keep data-cie-category-id in snake_case naming style (category_id is used by API query parameters under the hood).

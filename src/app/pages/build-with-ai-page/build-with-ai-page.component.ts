@@ -15,15 +15,17 @@ import {
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { mixHexColors, normalizeHexColor } from '../../utils/color-contrast.util';
 
 import {
   BuildWithAiAttachment,
   BuildWithAiChatMessage,
   BuildWithAiEditableFiles,
+  BuildWithAiSearchReplaceEdit,
   BuildWithAiErrorCategory,
+  BuildWithAiMessageTarget,
   BuildWithAiPatchLogEntry
 } from '../../models/build-with-ai.model';
+import { BwaiAiLogFileHashes, BwaiAiLogUpdatePayload } from '../../models/bwai-ai-log.model';
 import { BwaiPage, BwaiPageSummary, BwaiPageVersion } from '../../models/bwai-page.model';
 import { BuildWithAiApiService } from '../../services/build-with-ai-api.service';
 import { BuildWithAiContextMeterService } from '../../services/build-with-ai-context-meter.service';
@@ -33,12 +35,14 @@ import { BuildWithAiSyntaxValidatorService } from '../../services/build-with-ai-
 import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
 import { BwaiPageService } from '../../services/bwai-page.service';
 import {
-  BUILD_WITH_AI_FONT_PAIRS,
   BUILD_WITH_AI_FOOTER_HTML,
   BUILD_WITH_AI_HEADER_HTML,
   BUILD_WITH_AI_MODELS,
   BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT,
+  BUILD_WITH_AI_SECTION_IN_VIEW_RUNTIME_SCRIPT,
   BUILD_WITH_AI_STATIC_SHELL_CSS,
+  BUILD_WITH_AI_THEME_FONT_HREF_RESOLVER,
+  BUILD_WITH_AI_THEME_STYLE_BUILDER,
   BUILD_WITH_AI_STORAGE_KEY
 } from './build-with-ai.constants';
 import { BwaiSeoModalComponent, BwaiSeoFormValue } from './bwai-seo-modal/bwai-seo-modal.component';
@@ -61,7 +65,8 @@ const SIDEBAR_WIDTH_MAX = 720;
 const MOBILE_SIDEBAR_BREAKPOINT = 1100;
 
 export interface SelectedSection {
-  selector: string;
+  selector: string;     // precise selector for runtime DOM targeting (data-bwai-id based)
+  reference: string;    // human-readable selector hint (e.g. .lp-hero)
   bwaiId: string;       // data-bwai-id attribute value — unique, stable section identifier
   label: string;
   sectionIndex: number;
@@ -185,6 +190,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     // Live-patch HTML/CSS/JS into iframe without reload when files change
     effect(() => {
       const f = this.files();
+      const page = this.currentPage();
       if (!this.iframeReady) return;
       if (this.skipNextIframePatch) { this.skipNextIframePatch = false; return; }
       this.sendToIframe({
@@ -192,6 +198,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         html: f.html,
         css: f.css,
         js: f.js,
+        themeCss: this.buildThemeStyleCss(page),
+        themeFontHref: this.buildThemeFontHref(page),
         productsRuntime: BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT
       });
     });
@@ -223,6 +231,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       type?: string;
       message?: string;
       selector?: string;
+      reference?: string;
       bwaiId?: string;
       label?: string;
       sectionIndex?: number;
@@ -241,6 +250,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     if (payload.type === 'bwai-selected') {
       this.selectedSection.set({
         selector: payload.selector ?? '',
+        reference: payload.reference ?? payload.selector ?? '',
         bwaiId: payload.bwaiId ?? '',
         label: payload.label ?? '',
         sectionIndex: payload.sectionIndex ?? 0,
@@ -278,7 +288,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           const sel = this.selectedSection();
           if (sel) {
             this.previewIframe?.nativeElement.contentWindow?.postMessage(
-              { type: 'bwai-highlight', selector: sel.selector }, '*'
+              { type: 'bwai-highlight', selector: sel.selector, bwaiId: sel.bwaiId }, '*'
             );
           }
           break;
@@ -356,15 +366,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         this.selectedModelKey.set(page.currentModelKey);
       }
 
-      // Apply stored font/accent overrides to preview
-      if (page.fontPair || page.accentColor) {
-        this.applyPageStyleOverrides(page.fontPair ?? null, page.accentColor ?? null);
-      }
-
       this.selectedSection.set(null);
       this.hiddenSections.set(page.hiddenSections ?? []);
 
-      this.activeSrcdoc.set(this.buildPreviewDocument(this.files(), page.hiddenSections ?? []));
+      this.activeSrcdoc.set(this.buildPreviewDocument(this.files(), page.hiddenSections ?? [], page));
 
       // Auto-send if navigated here with a prompt (e.g. from "AI build" new-page flow)
       const state = window.history.state as Record<string, unknown> | null;
@@ -483,71 +488,16 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         accentColor: settings.accentColor ?? undefined
       });
       this.currentPage.set(updated);
-
-      // Apply font/accent changes to content.css
-      this.applyPageStyleOverrides(updated.fontPair ?? null, updated.accentColor ?? null);
     } catch {
-      // Settings still applied locally even if persist fails
+      // Non-fatal: keep current editor state unchanged when settings save fails.
     }
-  }
-
-  private applyPageStyleOverrides(fontPairId: string | null, accentColor: string | null): void {
-    let css = this.files().css;
-    if (!css) return;
-
-    const pair = fontPairId
-      ? BUILD_WITH_AI_FONT_PAIRS.find((p) => p.id === fontPairId)
-      : null;
-
-    if (pair && pair.id !== 'playfair-lato') {
-      // Replace @import line
-      css = css.replace(
-        /@import url\([^)]+\);/,
-        `@import url('${pair.googleFontsUrl}');`
-      );
-      // Replace or add --lp-serif
-      if (/--lp-serif:/.test(css)) {
-        css = css.replace(/--lp-serif:\s*[^;]+;/, `--lp-serif: '${pair.serifVar}', Georgia, serif;`);
-      }
-      // Replace or add --lp-sans
-      if (/--lp-sans:/.test(css)) {
-        css = css.replace(/--lp-sans:\s*[^;]+;/, `--lp-sans: '${pair.sansVar}', system-ui, sans-serif;`);
-      }
-    }
-
-    if (accentColor) {
-      const primary = normalizeHexColor(accentColor, '#ff3399');
-      const mid   = mixHexColors(primary, '#ffffff', 0.68);
-      const soft  = mixHexColors(primary, '#ffffff', 0.17);
-      const faint = mixHexColors(primary, '#ffffff', 0.07);
-      const r = parseInt(primary.slice(1, 3), 16);
-      const g = parseInt(primary.slice(3, 5), 16);
-      const b = parseInt(primary.slice(5, 7), 16);
-      const shadow = `0 8px 32px rgba(${r},${g},${b},.24)`;
-
-      const replacements: [RegExp, string][] = [
-        [/--lp-primary:\s*[^;]+;/, `--lp-primary: ${primary};`],
-        [/--lp-primary-mid:\s*[^;]+;/, `--lp-primary-mid: ${mid};`],
-        [/--lp-primary-soft:\s*[^;]+;/, `--lp-primary-soft: ${soft};`],
-        [/--lp-primary-faint:\s*[^;]+;/, `--lp-primary-faint: ${faint};`],
-        [/--lp-shadow-primary:\s*[^;]+;/, `--lp-shadow-primary: ${shadow};`],
-      ];
-
-      for (const [pattern, replacement] of replacements) {
-        if (pattern.test(css)) {
-          css = css.replace(pattern, replacement);
-        }
-      }
-    }
-
-    this.files.update((f) => ({ ...f, css }));
   }
 
   async onVisualReview(patchId: string): Promise<void> {
     if (this.reviewingPatchId()) return;
     this.reviewingPatchId.set(patchId);
     try {
-      const previewHtml = this.buildPreviewDocument(this.files(), []);
+      const previewHtml = this.buildPreviewDocument(this.files(), [], this.currentPage());
       const { review } = await this.apiService.requestVisualReview(previewHtml, this.selectedModel().key);
 
       // Append review as assistant message
@@ -595,7 +545,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       if (result.mode === 'ai' && result.description) {
         await new Promise<void>((res) => setTimeout(res, 800)); // brief delay for navigation/load
         this.draftMessage.set(
-          `Build a complete landing page for: ${result.description}. The lp- design system is already in content.css (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Do NOT re-import fonts or redefine :root. Do NOT add header, nav, or footer — they are already in the shell.`
+          `Build a complete landing page for: ${result.description}. The lp- design system is already in the shell styles (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Keep content.css additive for custom page styling. Do NOT add header, nav, or footer — they are already in the shell.`
         );
         void this.onSend();
       }
@@ -786,7 +736,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     const sel = this.selectedSection();
     if (sel) {
-      win.postMessage({ type: 'bwai-highlight', selector: sel.selector }, '*');
+      win.postMessage({ type: 'bwai-highlight', selector: sel.selector, bwaiId: sel.bwaiId }, '*');
     }
   }
 
@@ -797,7 +747,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   onDeselectSection(): void {
     this.selectedSection.set(null);
     this.previewIframe?.nativeElement.contentWindow?.postMessage(
-      { type: 'bwai-highlight', selector: null },
+      { type: 'bwai-highlight', selector: null, bwaiId: null },
       '*'
     );
   }
@@ -849,7 +799,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   onInsertSection(type: string): void {
     const sel = this.selectedSection();
     const afterText = sel
-      ? ` after the ${sel.selector} section (index ${sel.sectionIndex})`
+      ? ` after the "${sel.label}" section (${sel.reference}, position ${sel.sectionIndex + 1} of ${sel.totalSections})`
       : ' at the end of the page';
 
     let prompt = `Insert a "${type}" section${afterText}. Match the existing lp- CSS class naming convention, primary accent (--lp-primary), and design tokens.`;
@@ -858,15 +808,17 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       prompt = [
         `Insert a "Products List (Request)" section${afterText}.`,
         'Use a contract-based section root exactly like this:',
-        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="request" data-cie-ref-type="city" data-cie-country="NO" data-cie-lang="no" data-cie-limit="8"><div data-cie-products-list-mount></div></section>',
-        'Do not write custom API fetching code in content.js for this section. The runtime handles requests and sends x-source-header=MARKETPLACE.'
+        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="request" data-cie-ref-type="city" data-cie-country="NO" data-cie-lang="no" data-cie-show-search="true" data-cie-predefined-category="" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any"><div data-cie-products-list-mount></div></section>',
+        'Do not write custom API fetching code in content.js for this section. The runtime handles requests and sends x-source-header=MARKETPLACE.',
+        'Use data-cie-limit only when the user explicitly asks to cap product count; otherwise omit it for unlimited results.'
       ].join('\n');
     } else if (type === 'Products List (Preset)') {
       prompt = [
         `Insert a "Products List (Preset)" section${afterText}.`,
         'Use a contract-based section root exactly like this:',
-        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="preset" data-cie-ref-type="bakery" data-cie-ref-name="rosenborg-bakeri" data-cie-category-id="1" data-cie-limit="8" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any" data-cie-country="NO" data-cie-lang="no"><div data-cie-products-list-mount></div></section>',
-        'Keep optional filter attributes even when empty. Do not add custom fetch logic in content.js for this section.'
+        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="preset" data-cie-ref-type="bakery" data-cie-ref-name="rosenborg-bakeri" data-cie-category-id="1" data-cie-show-search="false" data-cie-predefined-category="" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any" data-cie-country="NO" data-cie-lang="no"><div data-cie-products-list-mount></div></section>',
+        'Keep optional filter attributes even when empty. Do not add custom fetch logic in content.js for this section.',
+        'data-cie-category-id is optional only when data-cie-predefined-category is provided.'
       ].join('\n');
     }
 
@@ -888,12 +840,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       return;
     }
 
+    const selectedTarget = this.selectedSection();
     const userMessage: BuildWithAiChatMessage = {
       id: this.createId('user'),
       role: 'user',
       text: this.draftMessage().trim(),
       createdAt: Date.now(),
-      attachments: this.pendingAttachments()
+      attachments: this.pendingAttachments(),
+      ...(selectedTarget ? { target: this.toMessageTarget(selectedTarget) } : {})
     };
 
     this.messages.update((messages) => [...messages, userMessage]);
@@ -1000,12 +954,32 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
   // ── Private helpers ─────────────────────────────────────────────────────
 
+  private toMessageTarget(section: SelectedSection): BuildWithAiMessageTarget {
+    return {
+      selector: section.selector,
+      reference: section.reference,
+      label: section.label,
+      bwaiId: section.bwaiId,
+      sectionIndex: section.sectionIndex,
+      totalSections: section.totalSections,
+      outerHtml: section.outerHtml
+    };
+  }
+
   private async generateAndApplyPatch(): Promise<void> {
     this.processing.set(true);
     let lastRawDiff: string | null = null;
     let logId: string | undefined;
+    let lastEdits: BuildWithAiSearchReplaceEdit[] = [];
+    let lastWarnings: string[] = [];
+    let lastApplyResults: BwaiAiLogUpdatePayload['applyResults'] = [];
+    let lastTouchedFiles: string[] = [];
 
     try {
+      const allowGlobalStyleOverride =
+        this.isGlobalStyleOverrideAllowedForRequest() ||
+        this.isInitialBuildRequest();
+
       // Keep only the last 10 messages to avoid unbounded context growth
       const allMessages = this.buildMessagesWithSectionContext();
       const trimmedMessages = allMessages.length > 10
@@ -1013,12 +987,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         : allMessages;
 
       const page = this.currentPage();
+      const beforeFiles = this.files();
       const response = await this.apiService.requestPatch(
         {
           modelKey: this.selectedModel().key,
           messages: trimmedMessages,
-          files: this.files(),
+          files: beforeFiles,
           systemPromptOverride: this.systemPromptOverride(),
+          allowGlobalStyleOverride,
           pageId: page?.id,
           pageSlug: page?.slug
         },
@@ -1026,13 +1002,19 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       );
 
       logId = response.logId;
+      lastEdits = response.edits;
+      lastWarnings = response.warnings ?? [];
 
       if (!response.edits?.length) {
         throw new Error('AI response did not include any edits.');
       }
 
       lastRawDiff = JSON.stringify(response.edits);
-      const diffResult = this.diffService.applyEdits(this.files(), response.edits);
+      const diffResult = this.diffService.applyEdits(beforeFiles, response.edits, {
+        allowGlobalStyleOverride
+      });
+      lastApplyResults = diffResult.editResults;
+      lastTouchedFiles = [...diffResult.touchedFiles];
 
       // Check for unmatched edits before syntax validation
       if (!diffResult.ok) {
@@ -1040,6 +1022,13 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           .filter(r => r.status !== 'matched')
           .map(r => `${r.file}: ${r.error ?? r.status}`)
           .join(' | ');
+        const hasStyleOverrideHint = unmatchedDetails.includes('[ALLOW_STYLE_OVERRIDE]');
+        const assistantRejectionText = [
+          response.assistantText || 'Patch could not be applied — some edits did not match the current file content.',
+          hasStyleOverrideHint ? 'Hint: add [ALLOW_STYLE_OVERRIDE] to your latest message if this global style change is intentional.' : ''
+        ]
+          .filter(Boolean)
+          .join('\n\n');
         this.pushPatchLog(JSON.stringify(response.edits), 'rejected', `Unmatched edits: ${unmatchedDetails}`);
         this.setError('patch', `Patch rejected: ${unmatchedDetails}`);
 
@@ -1048,7 +1037,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           {
             id: this.createId('assistant'),
             role: 'assistant',
-            text: response.assistantText || 'Patch could not be applied — some edits did not match the current file content.',
+            text: assistantRejectionText,
             createdAt: Date.now(),
             attachments: [],
             errorCategory: 'patch'
@@ -1056,11 +1045,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         ]);
 
         if (logId) {
-          void this.aiLogService.updateLogAsync(logId, {
+          this.updateLogWithRetry(logId, {
+            edits: response.edits,
             applyResults: diffResult.editResults,
             applyStatus: 'rejected',
             rejectionReason: `Unmatched edits: ${unmatchedDetails}`,
-            warnings: response.warnings
+            warnings: response.warnings,
+            afterFileHashes: this.buildFileHashes(this.files()),
+            touchedFiles: diffResult.touchedFiles
           });
         }
 
@@ -1091,11 +1083,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         ]);
 
         if (logId) {
-          void this.aiLogService.updateLogAsync(logId, {
+          this.updateLogWithRetry(logId, {
+            edits: response.edits,
             applyResults: diffResult.editResults,
             applyStatus: 'rejected',
             rejectionReason: `Syntax validation: ${details}`,
-            warnings: response.warnings
+            warnings: response.warnings,
+            afterFileHashes: this.buildFileHashes(this.files()),
+            touchedFiles: diffResult.touchedFiles
           });
         }
 
@@ -1113,10 +1108,13 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
 
       if (logId) {
-        void this.aiLogService.updateLogAsync(logId, {
+        this.updateLogWithRetry(logId, {
+          edits: response.edits,
           applyResults: diffResult.editResults,
           applyStatus: 'applied',
-          warnings: response.warnings
+          warnings: response.warnings,
+          afterFileHashes: this.buildFileHashes(nextFiles),
+          touchedFiles: diffResult.touchedFiles
         });
       }
 
@@ -1163,30 +1161,158 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       if (lastRawDiff) {
         this.pushPatchLog(lastRawDiff, 'rejected', message);
       }
+      if (logId) {
+        const errorPayload: BwaiAiLogUpdatePayload = {
+          applyResults: lastApplyResults,
+          applyStatus: 'error',
+          rejectionReason: message,
+          warnings: lastWarnings,
+          afterFileHashes: this.buildFileHashes(this.files()),
+          touchedFiles: lastTouchedFiles
+        };
+        if (lastEdits.length) {
+          errorPayload.edits = lastEdits;
+        }
+        this.updateLogWithRetry(logId, errorPayload);
+      }
       void this.persistToMongo({ messages: this.messages(), patchLogs: this.patchLogs() });
     } finally {
       this.processing.set(false);
     }
   }
 
+  private updateLogWithRetry(logId: string, payload: BwaiAiLogUpdatePayload): void {
+    const retryDelaysMs = [200, 600, 1500];
+    const maxAttempts = 3;
+
+    void (async () => {
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (attempt > 1) {
+          const delayMs = retryDelaysMs[Math.min(attempt - 2, retryDelaysMs.length - 1)];
+          await this.sleep(delayMs);
+        }
+
+        try {
+          await this.aiLogService.updateLogAsync(logId, payload);
+          return;
+        } catch (error) {
+          if (attempt === maxAttempts) {
+            console.error(`[BWAI] Failed to update log ${logId} after ${maxAttempts} attempts.`, error);
+          }
+        }
+      }
+    })();
+  }
+
+  private buildFileHashes(files: BuildWithAiEditableFiles): BwaiAiLogFileHashes {
+    return {
+      html: this.hashDeterministic(files.html),
+      css: this.hashDeterministic(files.css),
+      js: this.hashDeterministic(files.js)
+    };
+  }
+
+  private hashDeterministic(value: string): string {
+    // Lightweight deterministic hash for debug correlation, not cryptographic integrity.
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
   private buildMessagesWithSectionContext(): BuildWithAiChatMessage[] {
     const messages = this.messages();
-    const sel = this.selectedSection();
-
-    if (!sel || messages.length === 0) return messages;
+    if (messages.length === 0) return messages;
 
     const lastMsg = messages[messages.length - 1];
     if (lastMsg.role !== 'user') return messages;
+    if (!lastMsg.target) return messages;
+
+    const target = lastMsg.target;
+    const safePosition = `${target.sectionIndex + 1} of ${target.totalSections}`;
+    const reference = target.reference || target.selector || '(unknown selector)';
+    const label = target.label || 'Selected section';
+    const productsListContext = this.buildProductsListContextSuffix(target.outerHtml);
 
     const contextPrefix =
-      `[Editing section: ${sel.selector} — index ${sel.sectionIndex} of ${sel.totalSections - 1}]\n` +
-      `Section HTML:\n${sel.outerHtml}\n\n` +
+      `[Editing section: ${label} (${reference}, position ${safePosition})]\n` +
+      `[Exact selector: ${target.selector}]\n` +
+      `Section HTML:\n${target.outerHtml}${productsListContext}\n\n` +
       `User request: `;
 
     return [
       ...messages.slice(0, -1),
       { ...lastMsg, text: `${contextPrefix}${lastMsg.text}` }
     ];
+  }
+
+  private buildProductsListContextSuffix(sectionHtml: string): string {
+    if (!this.isProductsListSectionHtml(sectionHtml)) {
+      return '';
+    }
+
+    return [
+      '',
+      '',
+      '[Products List section context]',
+      '- Use data attributes on the section root (no custom fetching in content.js):',
+      '  - data-cie-component="products-list"',
+      '  - data-cie-mode="request" or "preset"',
+      '  - data-cie-ref-type="city" or "bakery"',
+      '  - data-cie-ref-name OR data-cie-bakery-id',
+      '  - data-cie-category-id (optional when data-cie-predefined-category is set)',
+      '  - optional: data-cie-show-search, data-cie-predefined-category, data-cie-allergen-ids, data-cie-group-ids, data-cie-motive, data-cie-limit, data-cie-country, data-cie-lang',
+      '- Runtime behavior:',
+      '  - data-cie-predefined-category locks category and hides tabs.',
+      '  - Missing predefined-category match shows no products (no hard runtime error).',
+      '  - Omit data-cie-limit for unlimited products; include it only when an explicit cap is needed.',
+      '- Runtime layout hooks:',
+      '  - classes: .cie-products-list-shell, .cie-products-list, .cie-products-list__search-area, .cie-products-list__tabs, .cie-products-list__grid, .cie-products-list__card, .cie-products-list__empty, .cie-products-list__status',
+      '  - vars: --ciepl-surface, --ciepl-surface-soft, --ciepl-surface-muted, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint'
+    ].join('\n');
+  }
+
+  private isProductsListSectionHtml(sectionHtml: string): boolean {
+    return /data-cie-component\s*=\s*["']products-list["']/i.test(sectionHtml);
+  }
+
+  private isGlobalStyleOverrideAllowedForRequest(): boolean {
+    const latestUserMessage = [...this.messages()].reverse().find((message) => message.role === 'user');
+    if (!latestUserMessage) return false;
+    return latestUserMessage.text.includes('[ALLOW_STYLE_OVERRIDE]');
+  }
+
+  private isInitialBuildRequest(): boolean {
+    return !this.files().html.trim();
+  }
+
+  private resolveThemeConfig(
+    theme: { fontPair?: string | null; accentColor?: string | null } | null = this.currentPage()
+  ): { fontPair?: string | null; accentColor?: string | null } {
+    return {
+      fontPair: theme?.fontPair ?? null,
+      accentColor: theme?.accentColor ?? null
+    };
+  }
+
+  private buildThemeStyleCss(
+    theme: { fontPair?: string | null; accentColor?: string | null } | null = this.currentPage()
+  ): string {
+    return BUILD_WITH_AI_THEME_STYLE_BUILDER(this.resolveThemeConfig(theme));
+  }
+
+  private buildThemeFontHref(
+    theme: { fontPair?: string | null; accentColor?: string | null } | null = this.currentPage()
+  ): string {
+    return BUILD_WITH_AI_THEME_FONT_HREF_RESOLVER(this.resolveThemeConfig(theme));
   }
 
   private normalizeHtml(html: string): string {
@@ -1323,9 +1449,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  private buildPreviewDocument(files: BuildWithAiEditableFiles, hiddenSections: string[] = []): string {
+  private buildPreviewDocument(
+    files: BuildWithAiEditableFiles,
+    hiddenSections: string[] = [],
+    theme: { fontPair?: string | null; accentColor?: string | null } | null = null
+  ): string {
     const safeCss = files.css.replace(/<\/style>/gi, '<\\/style>');
     const safeJs = files.js.replace(/<\/script>/gi, '<\\/script>');
+    const themeCss = this.buildThemeStyleCss(theme).replace(/<\/style>/gi, '<\\/style>');
+    const themeFontHref = this.buildThemeFontHref(theme);
     // Hidden sections use the bwai-hidden class (applied via postMessage in the live builder).
     // On initial srcdoc load we apply via data attribute selector so sections are already collapsed.
     const hiddenCss = hiddenSections.length
@@ -1338,9 +1470,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Build with AI preview</title>
-    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap" rel="stylesheet" />
+    <link id="BuildWithAiThemeFonts" href="${themeFontHref}" rel="stylesheet" />
     <style>${BUILD_WITH_AI_STATIC_SHELL_CSS}</style>
-    <style id="BuildWithAiContentStyle">${safeCss}</style>${hiddenCss ? `\n    <style id="BuildWithAiHiddenSections">${hiddenCss}</style>` : ''}
+    <style id="BuildWithAiContentStyle">${safeCss}</style>
+    <style id="BuildWithAiThemeStyle">${themeCss}</style>${hiddenCss ? `\n    <style id="BuildWithAiHiddenSections">${hiddenCss}</style>` : ''}
   </head>
   <body>
     ${BUILD_WITH_AI_HEADER_HTML}
@@ -1470,15 +1603,144 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           for (var i = 0; i < els.length; i++) els[i].classList.remove(cls);
         }
 
+        function normalizeText(value) {
+          return String(value || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function truncateText(value, maxLen) {
+          if (!value || value.length <= maxLen) return value;
+          return value.slice(0, maxLen - 1).trimEnd() + '…';
+        }
+
+        function toTitleCase(value) {
+          var cleaned = normalizeText(value).replace(/[_-]+/g, ' ');
+          if (!cleaned) return '';
+          var acronymMap = { faq: 'FAQ', cta: 'CTA', ux: 'UX', ui: 'UI' };
+          return cleaned
+            .split(' ')
+            .filter(function (part) { return part.length > 0; })
+            .map(function (part) {
+              var lower = part.toLowerCase();
+              if (acronymMap[lower]) return acronymMap[lower];
+              return lower.charAt(0).toUpperCase() + lower.slice(1);
+            })
+            .join(' ');
+        }
+
+        function getSectionClasses(el) {
+          if (!el || !el.classList) return [];
+          return Array.from(el.classList).filter(function (cls) {
+            return cls && !/^bwai-/.test(cls);
+          });
+        }
+
+        function getSectionReference(classes, idx) {
+          var preferred = classes.find(function (cls) { return /^lp-/.test(cls); }) || classes[0] || '';
+          return preferred ? ('.' + preferred) : ('section:nth-child(' + (idx + 1) + ')');
+        }
+
+        function escapeCssIdent(value) {
+          var text = String(value || '');
+          if (!text) return '';
+          if (window.CSS && typeof window.CSS.escape === 'function') {
+            return window.CSS.escape(text);
+          }
+          return text
+            .split('')
+            .map(function (ch, idx) {
+              var isAlpha = /[a-zA-Z]/.test(ch);
+              var isDigit = /[0-9]/.test(ch);
+              var isDashOrUnderscore = ch === '-' || ch === '_';
+              var isSafe = isAlpha || isDigit || isDashOrUnderscore;
+
+              if (isSafe && !(idx === 0 && isDigit)) {
+                return ch;
+              }
+
+              var hex = ch.charCodeAt(0).toString(16).toUpperCase();
+              return '\\\\' + hex + ' ';
+            })
+            .join('');
+        }
+
+        function inferSemanticLabel(classes) {
+          if (!classes.length) return '';
+
+          var tokens = classes
+            .join(' ')
+            .replace(/[^a-z0-9]+/gi, ' ')
+            .toLowerCase();
+
+          var rules = [
+            { re: /\bhero\b/, label: 'Hero' },
+            { re: /\bfaq\b/, label: 'FAQ' },
+            { re: /\bcta\b/, label: 'CTA' },
+            { re: /\b(testimonial|testimonials|review|reviews|proof)\b/, label: 'Testimonials' },
+            { re: /\b(stat|stats|metric|metrics|numbers|kpi)\b/, label: 'Stats' },
+            { re: /\b(feature|features|benefit|benefits|props|how)\b/, label: 'Features' },
+            { re: /\b(portfolio|showcase|gallery)\b/, label: 'Showcase' },
+            { re: /\b(product|products|catalog|shop)\b/, label: 'Products' },
+            { re: /\b(contact|form)\b/, label: 'Contact' },
+            { re: /\b(logo|logos|trust|partner|partners)\b/, label: 'Trust' },
+            { re: /\babout\b/, label: 'About' },
+            { re: /\b(pricing|price)\b/, label: 'Pricing' }
+          ];
+
+          for (var i = 0; i < rules.length; i++) {
+            if (rules[i].re.test(tokens)) return rules[i].label;
+          }
+          return '';
+        }
+
+        function inferSectionLabel(el, classes, idx) {
+          var explicit = normalizeText(el.getAttribute('data-bwai-label'));
+          if (explicit) return truncateText(explicit, 48);
+
+          var component = normalizeText(el.getAttribute('data-cie-component')).toLowerCase();
+          if (component === 'products-list') {
+            var mode = normalizeText(el.getAttribute('data-cie-mode')).toLowerCase();
+            if (mode === 'request') return 'Products List (Request)';
+            if (mode === 'preset') return 'Products List (Preset)';
+            return 'Products List';
+          }
+
+          var semantic = inferSemanticLabel(classes);
+          var headingEl = el.querySelector('h1,h2,h3,h4,h5,h6');
+          var heading = headingEl ? normalizeText(headingEl.textContent) : '';
+
+          if (semantic && heading && heading.length <= 42) {
+            var semanticLower = semantic.toLowerCase();
+            if (heading.toLowerCase().indexOf(semanticLower) === -1) {
+              return truncateText(semantic + ': ' + heading, 48);
+            }
+          }
+
+          if (semantic) return semantic;
+          if (heading) return truncateText(heading, 48);
+
+          var clsFallback = classes[0] ? classes[0].replace(/^lp-/, '') : '';
+          if (clsFallback) return toTitleCase(clsFallback);
+
+          return 'Section ' + (idx + 1);
+        }
+
         function getSectionMeta(el) {
           var root = document.getElementById('EditableContentRoot');
           var siblings = root ? Array.from(root.children) : [el];
           var idx = siblings.indexOf(el);
-          var rawClasses = (el.className || '').replace(/bwai-\\S*/g, '').trim().split(/\\s+/);
-          var firstClass = rawClasses.find(function (c) { return c.length > 0; }) || '';
-          var selector = firstClass ? ('.' + firstClass) : ('section:nth-child(' + (idx + 1) + ')');
+          var classes = getSectionClasses(el);
           var bwaiId = ensureSectionId(el);
-          return { idx: idx, total: siblings.length, selector: selector, bwaiId: bwaiId };
+          var selector = '#' + escapeCssIdent(bwaiId);
+          var reference = getSectionReference(classes, idx);
+          var label = inferSectionLabel(el, classes, idx);
+          return {
+            idx: idx,
+            total: siblings.length,
+            selector: selector,
+            reference: reference,
+            label: label,
+            bwaiId: bwaiId
+          };
         }
 
         /* ── insert popup ── */
@@ -1630,14 +1892,13 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
             }
 
             var m2 = getSectionMeta(toolbarSection);
-            var lbl = m2.selector.replace(/^\\.lp-/, '').replace(/-/g, ' ');
-            lbl = lbl.charAt(0).toUpperCase() + lbl.slice(1);
             // Update Angular's selectedSection so move/hide/remove handlers target the right section
             parent.postMessage({
               type: 'bwai-selected',
               selector: m2.selector,
+              reference: m2.reference,
               bwaiId: m2.bwaiId,
-              label: lbl,
+              label: m2.label,
               sectionIndex: m2.idx,
               totalSections: m2.total,
               outerHtml: getCleanOuterHtml(toolbarSection)
@@ -1656,8 +1917,14 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
           if (d.type === 'bwai-highlight') {
             clearClass('bwai-selected');
-            if (d.selector) {
-              var el = document.querySelector(d.selector);
+            if (d.selector || d.bwaiId) {
+              var el = null;
+              if (d.bwaiId) {
+                el = document.getElementById(String(d.bwaiId));
+              }
+              if (!el && d.selector) {
+                el = document.querySelector(d.selector);
+              }
               if (el) {
                 el.classList.add('bwai-selected');
                 var m = getSectionMeta(el);
@@ -1684,10 +1951,22 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
             var styleEl = document.getElementById('BuildWithAiContentStyle');
             if (styleEl && d.css != null) styleEl.textContent = d.css;
 
+            var themeStyleEl = document.getElementById('BuildWithAiThemeStyle');
+            if (themeStyleEl && d.themeCss != null) themeStyleEl.textContent = String(d.themeCss);
+
+            var themeFontLink = document.getElementById('BuildWithAiThemeFonts');
+            if (themeFontLink && d.themeFontHref != null && themeFontLink.tagName === 'LINK') {
+              themeFontLink.setAttribute('href', String(d.themeFontHref));
+            }
+
             var root2 = document.getElementById('EditableContentRoot');
             if (root2 && d.html != null) {
               root2.innerHTML = d.html;
               ensureAllSectionIds();
+            }
+
+            if (window.CIESectionInViewRuntime && typeof window.CIESectionInViewRuntime.hydrate === 'function') {
+              window.CIESectionInViewRuntime.hydrate(document);
             }
 
             var oldScript = document.getElementById('BuildWithAiContentScript');
@@ -1986,6 +2265,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       })();
     </script>
 
+    <script id="CieSectionInViewRuntime">${BUILD_WITH_AI_SECTION_IN_VIEW_RUNTIME_SCRIPT}</script>
     <script id="CieProductsListRuntime">${BUILD_WITH_AI_PRODUCTS_LIST_RUNTIME_SCRIPT}</script>
     <script id="BuildWithAiContentScript">${safeJs}</script>
   </body>

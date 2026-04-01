@@ -215,4 +215,66 @@ describe('BuildWithAiDiffService', () => {
     expect(result.files.css).toBe('.a{color:red;}\n.b{color:blue;}');
     expect(result.editResults[0].status).toBe('matched');
   });
+
+  it('rejects protected global style edits in content.css by default', () => {
+    const result = service.applyEdits(
+      { html: '', css: '.lp-btn { color: red; }', js: '' },
+      [{
+        file: 'content.css',
+        search: '.lp-btn { color: red; }',
+        value: '.lp-btn { color: blue; }'
+      }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.files.css).toBe('.lp-btn { color: red; }');
+    expect(result.editResults[0].status).toBe('error');
+    expect(result.editResults[0].error).toContain('[ALLOW_STYLE_OVERRIDE]');
+  });
+
+  it('allows protected global style edits when override flag is true', () => {
+    const result = service.applyEdits(
+      { html: '', css: '.lp-btn { color: red; }', js: '' },
+      [{
+        file: 'content.css',
+        search: '.lp-btn { color: red; }',
+        value: '.lp-btn { color: blue; }'
+      }],
+      { allowGlobalStyleOverride: true }
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.files.css).toBe('.lp-btn { color: blue; }');
+    expect(result.editResults[0].status).toBe('matched');
+  });
+
+  it('allows insert mode for content.css when file only has lightweight baseline content', () => {
+    const result = service.applyEdits(
+      { html: '', css: '/* baseline */\n#EditableContentRoot { position: relative; }', js: '' },
+      [{
+        file: 'content.css',
+        mode: 'insert',
+        search: '',
+        value: '.page{color:#333;}'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.files.css).toBe('.page{color:#333;}');
+    expect(result.editResults[0].status).toBe('matched');
+  });
+
+  it('does not protect base section selectors like .lp-hero by default', () => {
+    const result = service.applyEdits(
+      { html: '', css: '.lp-hero { padding: 10px; }', js: '' },
+      [{
+        file: 'content.css',
+        search: '.lp-hero { padding: 10px; }',
+        value: '.lp-hero { padding: 20px; }'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.files.css).toBe('.lp-hero { padding: 20px; }');
+  });
 });

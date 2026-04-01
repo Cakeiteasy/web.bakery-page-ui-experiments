@@ -26,12 +26,23 @@ export interface BuildWithAiAttachment {
   url?: string;
 }
 
+export interface BuildWithAiMessageTarget {
+  selector: string;
+  reference: string;
+  label: string;
+  bwaiId: string;
+  sectionIndex: number;
+  totalSections: number;
+  outerHtml: string;
+}
+
 export interface BuildWithAiChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   createdAt: number;
   attachments: BuildWithAiAttachment[];
+  target?: BuildWithAiMessageTarget;
   errorCategory?: BuildWithAiErrorCategory;
 }
 
@@ -58,6 +69,7 @@ export interface BuildWithAiApiRequest {
   messages: BuildWithAiChatMessage[];
   files: BuildWithAiEditableFiles;
   systemPromptOverride?: string | null;
+  allowGlobalStyleOverride?: boolean;
   pageId?: string;
   pageSlug?: string;
 }

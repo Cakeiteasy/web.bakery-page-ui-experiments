@@ -9,15 +9,30 @@ import {
   BuildWithAiSearchReplaceEdit
 } from '../models/build-with-ai.model';
 
+interface BuildWithAiDiffApplyOptions {
+  allowGlobalStyleOverride?: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class BuildWithAiDiffService {
   private readonly allowedFiles = new Set<BuildWithAiEditableFileName>(BUILD_WITH_AI_FILE_NAMES);
+  private readonly protectedCssSurfacePatterns: RegExp[] = [
+    /@import\b/i,
+    /(^|[\s,{;]):root\b/,
+    /\.lp-btn(?:\b|[-_])/,
+    /\.lp-eyebrow(?:\b|[-_])/
+  ];
 
-  applyEdits(currentFiles: BuildWithAiEditableFiles, edits: BuildWithAiSearchReplaceEdit[]): BuildWithAiDiffApplyResult {
+  applyEdits(
+    currentFiles: BuildWithAiEditableFiles,
+    edits: BuildWithAiSearchReplaceEdit[],
+    options: BuildWithAiDiffApplyOptions = {}
+  ): BuildWithAiDiffApplyResult {
     if (!edits.length) {
       throw new Error('No edits provided.');
     }
 
+    const allowGlobalStyleOverride = options.allowGlobalStyleOverride === true;
     const nextFiles: BuildWithAiEditableFiles = { ...currentFiles };
     const touchedFiles = new Set<BuildWithAiEditableFileName>();
     const editResults: BuildWithAiEditApplyResult[] = [];
@@ -31,8 +46,27 @@ export class BuildWithAiDiffService {
       const currentContent = nextFiles[contentKey];
       const resultBase = { file: edit.file, mode: edit.mode ?? 'replace', search: edit.search ?? '' };
 
+      if (
+        edit.file === 'content.css' &&
+        !allowGlobalStyleOverride &&
+        this.touchesProtectedCssSurface(edit.search ?? '', edit.value ?? '')
+      ) {
+        editResults.push({
+          ...resultBase,
+          status: 'error',
+          error: 'Protected global styles cannot be changed by default. Add [ALLOW_STYLE_OVERRIDE] to your latest message if this change is intentional.'
+        });
+        continue;
+      }
+
       if (edit.mode === 'insert') {
         if (currentContent !== '') {
+          if (edit.file === 'content.css' && this.isLightweightCssBaseline(currentContent)) {
+            nextFiles[contentKey] = edit.value;
+            touchedFiles.add(edit.file);
+            editResults.push({ ...resultBase, status: 'matched' });
+            continue;
+          }
           editResults.push({ ...resultBase, status: 'unmatched', error: `Insert mode requires an empty file, but ${edit.file} already has content.` });
           continue;
         }
@@ -124,5 +158,17 @@ export class BuildWithAiDiffService {
   private isBraceOnlySearch(value: string): boolean {
     const compact = value.replace(/\s/g, '');
     return compact.length >= 2 && /^}+$/.test(compact);
+  }
+
+  private touchesProtectedCssSurface(search: string, value: string): boolean {
+    const candidate = `${search}\n${value}`;
+    return this.protectedCssSurfacePatterns.some((pattern) => pattern.test(candidate));
+  }
+
+  private isLightweightCssBaseline(content: string): boolean {
+    const withoutBlockComments = content.replace(/\/\*[\s\S]*?\*\//g, '');
+    const compact = withoutBlockComments.replace(/\s/g, '');
+    if (!compact) return true;
+    return compact === '#EditableContentRoot{position:relative;}';
   }
 }

@@ -1,4 +1,4 @@
-import { streamText, CoreMessage } from 'ai';
+import { streamText } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import sharp from 'sharp';
@@ -22,6 +22,17 @@ interface IncomingMessage {
   role: 'user' | 'assistant';
   text: string;
   attachments: IncomingAttachment[];
+  target?: IncomingMessageTarget;
+}
+
+interface IncomingMessageTarget {
+  selector: string;
+  reference: string;
+  label: string;
+  bwaiId: string;
+  sectionIndex: number;
+  totalSections: number;
+  outerHtml: string;
 }
 
 interface IncomingFiles {
@@ -35,13 +46,14 @@ interface IncomingBody {
   messages: IncomingMessage[];
   files: IncomingFiles;
   systemPromptOverride?: string | null;
+  allowGlobalStyleOverride?: boolean;
   pageId?: string;
   pageSlug?: string;
 }
 
 interface SearchReplaceEdit {
   file: string;
-  mode?: 'replace' | 'insert';
+  mode?: 'replace' | 'insert' | 'insertAfter';
   search: string;
   value: string;
 }
@@ -50,6 +62,32 @@ interface ParsedModelPayload {
   assistantText: string;
   edits: SearchReplaceEdit[];
   warnings: string[];
+}
+
+interface LoggedSelectedTarget {
+  messageId: string;
+  label: string;
+  reference: string;
+  selector: string;
+  bwaiId: string;
+  sectionIndex: number;
+  totalSections: number;
+  outerHtml: string;
+  outerHtmlTruncated: boolean;
+}
+
+interface LoggedRequestMeta {
+  messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  attachmentCount: number;
+  allowGlobalStyleOverride: boolean;
+}
+
+interface LoggedFileHashes {
+  html: string;
+  css: string;
+  js: string;
 }
 
 const MODEL_REGISTRY: Record<string, { provider: 'openai' | 'google'; modelId: string; reasoningModel?: boolean }> = {
@@ -113,11 +151,19 @@ export default async function handler(req: any, res: any): Promise<void> {
       systemPrompt = `Extra context to keep in mind: ${payload.systemPromptOverride?.trim()}\n` + systemPrompt;
     }
 
+    const styleOverrideInstruction = payload.allowGlobalStyleOverride
+      ? 'This request explicitly allows global style overrides via [ALLOW_STYLE_OVERRIDE]. Protected global styles may be modified if necessary.'
+      : 'This request does not allow global style overrides. Do not modify protected global styles in content.css (:root, @import, .lp-btn*, .lp-eyebrow*).';
+    systemPrompt = `${styleOverrideInstruction}\n${systemPrompt}`;
+
     const promptChars = systemPrompt.length + messages.reduce((n, m) => n + JSON.stringify(m.content).length, 0);
     console.log(`[bwai] model=${payload.modelKey} promptChars=${promptChars} messages=${payload.messages.length}`);
 
     // Insert initial log document before streaming starts
     const lastUserMsg = [...payload.messages].reverse().find(m => m.role === 'user');
+    const selectedTargets = extractSelectedTargets(payload.messages);
+    const requestMeta = buildRequestMeta(payload.messages, payload.allowGlobalStyleOverride === true);
+    const beforeFileHashes = buildFileHashes(payload.files);
     const logDocId = new ObjectId();
     const mongoClient = await clientPromise;
     const db = mongoClient.db(dbName);
@@ -129,6 +175,13 @@ export default async function handler(req: any, res: any): Promise<void> {
       modelKey: payload.modelKey,
       provider: modelConfig.provider,
       lastUserMessage: lastUserMsg?.text ?? '',
+      selectedTargets,
+      requestMeta,
+      beforeFileHashes,
+      afterFileHashes: null,
+      touchedFiles: [],
+      assistantText: null,
+      responseParseError: null,
       edits: [],
       applyResults: null,
       applyStatus: null,
@@ -161,7 +214,9 @@ export default async function handler(req: any, res: any): Promise<void> {
           : {}
     });
 
+    let rawModelText = '';
     for await (const chunk of stream.textStream) {
+      rawModelText += chunk;
       res.write(chunk);
     }
 
@@ -172,10 +227,28 @@ export default async function handler(req: any, res: any): Promise<void> {
     const totalTimeMs = Date.now() - t0;
     console.log(`[bwai] llm=${llmTimeMs}ms total=${totalTimeMs}ms inputTokens=${inputTokens} outputTokens=${outputTokens}`);
 
-    // Update log with token/timing data
+    let parsedPayload: ParsedModelPayload | null = null;
+    let responseParseError: string | null = null;
+    try {
+      parsedPayload = parseModelPayload(rawModelText);
+    } catch (error) {
+      responseParseError = error instanceof Error ? error.message : 'Failed to parse streamed model output.';
+    }
+
+    // Update log with token/timing + parsed response
+    const logSet: Record<string, unknown> = { inputTokens, outputTokens, llmTimeMs, totalTimeMs };
+    if (parsedPayload) {
+      logSet['assistantText'] = parsedPayload.assistantText;
+      logSet['edits'] = parsedPayload.edits;
+      logSet['warnings'] = parsedPayload.warnings;
+      logSet['responseParseError'] = null;
+    } else if (responseParseError) {
+      logSet['responseParseError'] = responseParseError;
+    }
+
     await logsCol.updateOne(
       { _id: logDocId },
-      { $set: { inputTokens, outputTokens, llmTimeMs, totalTimeMs } }
+      { $set: logSet }
     );
 
     // Write logId sentinel so frontend can extract it without disrupting JSON parsing
@@ -212,6 +285,7 @@ export function parseIncomingBody(raw: unknown): IncomingBody {
   return {
     modelKey: typedPayload.modelKey,
     systemPromptOverride: typedPayload.systemPromptOverride ?? null,
+    allowGlobalStyleOverride: typedPayload.allowGlobalStyleOverride === true,
     pageId: typedPayload.pageId ? String(typedPayload.pageId) : undefined,
     pageSlug: typedPayload.pageSlug ? String(typedPayload.pageSlug) : undefined,
     files: {
@@ -233,7 +307,8 @@ export function parseIncomingBody(raw: unknown): IncomingBody {
           dataUrl: attachment?.dataUrl ? String(attachment.dataUrl) : undefined,
           url: attachment?.url ? String(attachment.url) : undefined
         }))
-        : []
+        : [],
+      target: parseMessageTarget((message as any).target)
     }))
   };
 }
@@ -381,8 +456,100 @@ function splitDataUrl(value: string): { mediaType?: string; base64Content: strin
   };
 }
 
+function parseMessageTarget(raw: unknown): IncomingMessageTarget | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+
+  const source = raw as Record<string, unknown>;
+
+  return {
+    selector: String(source['selector'] ?? ''),
+    reference: String(source['reference'] ?? ''),
+    label: String(source['label'] ?? ''),
+    bwaiId: String(source['bwaiId'] ?? ''),
+    sectionIndex: normalizeInteger(source['sectionIndex']),
+    totalSections: Math.max(1, normalizeInteger(source['totalSections'], 1)),
+    outerHtml: String(source['outerHtml'] ?? '')
+  };
+}
+
+function normalizeInteger(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+function extractSelectedTargets(messages: IncomingMessage[]): LoggedSelectedTarget[] {
+  const maxOuterHtmlLength = 8_000;
+
+  return messages
+    .filter((message): message is IncomingMessage & { target: IncomingMessageTarget } =>
+      message.role === 'user' && !!message.target
+    )
+    .map((message) => {
+      const outerHtml = message.target.outerHtml ?? '';
+      const outerHtmlTruncated = outerHtml.length > maxOuterHtmlLength;
+
+      return {
+        messageId: message.id || '',
+        label: message.target.label || '',
+        reference: message.target.reference || '',
+        selector: message.target.selector || '',
+        bwaiId: message.target.bwaiId || '',
+        sectionIndex: message.target.sectionIndex,
+        totalSections: message.target.totalSections,
+        outerHtml: outerHtmlTruncated ? outerHtml.slice(0, maxOuterHtmlLength) : outerHtml,
+        outerHtmlTruncated
+      };
+    });
+}
+
+function buildRequestMeta(messages: IncomingMessage[], allowGlobalStyleOverride: boolean): LoggedRequestMeta {
+  const userMessageCount = messages.filter((message) => message.role === 'user').length;
+  const assistantMessageCount = messages.length - userMessageCount;
+  const attachmentCount = messages.reduce(
+    (total, message) => total + (Array.isArray(message.attachments) ? message.attachments.length : 0),
+    0
+  );
+
+  return {
+    messageCount: messages.length,
+    userMessageCount,
+    assistantMessageCount,
+    attachmentCount,
+    allowGlobalStyleOverride
+  };
+}
+
+function buildFileHashes(files: IncomingFiles): LoggedFileHashes {
+  return {
+    html: hashDeterministic(files.html),
+    css: hashDeterministic(files.css),
+    js: hashDeterministic(files.js)
+  };
+}
+
+function hashDeterministic(value: string): string {
+  // Lightweight deterministic hash for debug correlation, not cryptographic integrity.
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 export function parseModelPayload(text: string): ParsedModelPayload {
-  const normalized = stripCodeFence(text.trim());
+  let normalized = stripCodeFence(text.trim());
+  const start = normalized.indexOf('{');
+  const end = normalized.lastIndexOf('}');
+  if (start !== -1 && end !== -1 && end > start) {
+    normalized = normalized.slice(start, end + 1);
+  }
 
   let parsed: any;
   try {
@@ -403,8 +570,9 @@ export function parseModelPayload(text: string): ParsedModelPayload {
     assistantText: typeof parsed.assistantText === 'string' ? parsed.assistantText : 'Applied the requested update.',
     edits: parsed.edits.map((e: any) => ({
       file: String(e?.file ?? ''),
-      search: String(e?.search ?? ''),
-      replace: String(e?.replace ?? '')
+      mode: e?.mode === 'insert' ? 'insert' : e?.mode === 'insertAfter' ? 'insertAfter' : 'replace',
+      search: e?.search != null ? String(e.search) : '',
+      value: e?.value != null ? String(e.value) : ''
     })),
     warnings: Array.isArray(parsed.warnings) ? parsed.warnings.map((warning) => String(warning)) : []
   };

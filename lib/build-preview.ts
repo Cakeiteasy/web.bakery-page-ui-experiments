@@ -20,6 +20,150 @@ export interface BwaiSeoMeta {
   ogImageUrl?: string;
 }
 
+export interface BwaiThemeMeta {
+  fontPair?: string | null;
+  accentColor?: string | null;
+}
+
+interface BwaiThemeFontPreset {
+  id: string;
+  googleFontsUrl: string;
+  serifVar: string;
+  sansVar: string;
+}
+
+interface BwaiResolvedTheme {
+  fontHref: string;
+  serifVar: string;
+  sansVar: string;
+  primary: string;
+  mid: string;
+  soft: string;
+  faint: string;
+  shadow: string;
+}
+
+const DEFAULT_THEME_FONT_PAIR_ID = 'playfair-lato';
+const DEFAULT_THEME_PRIMARY = '#ff3399';
+const BWAI_THEME_FONT_PRESETS: BwaiThemeFontPreset[] = [
+  {
+    id: 'playfair-lato',
+    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,700&family=Lato:wght@400;700&display=swap',
+    serifVar: 'Playfair Display',
+    sansVar: 'Lato'
+  },
+  {
+    id: 'fraunces-dm',
+    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,700;1,9..144,700&family=DM+Sans:wght@400;700&display=swap',
+    serifVar: 'Fraunces',
+    sansVar: 'DM Sans'
+  },
+  {
+    id: 'cormorant-nunito',
+    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,700;1,700&family=Nunito+Sans:wght@400;700&display=swap',
+    serifVar: 'Cormorant Garamond',
+    sansVar: 'Nunito Sans'
+  },
+  {
+    id: 'baskerville-source',
+    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,700;1,400&family=Source+Sans+3:wght@400;700&display=swap',
+    serifVar: 'Libre Baskerville',
+    sansVar: 'Source Sans 3'
+  },
+  {
+    id: 'italiana-raleway',
+    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=Italiana&family=Raleway:wght@400;700&display=swap',
+    serifVar: 'Italiana',
+    sansVar: 'Raleway'
+  }
+];
+
+function normalizeHexColor(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  var raw = String(value).trim();
+  if (!raw) return fallback;
+
+  var shortMatch = raw.match(/^#([a-fA-F0-9]{3})$/);
+  if (shortMatch) {
+    var shortHex = shortMatch[1];
+    raw = '#' + shortHex.charAt(0) + shortHex.charAt(0) + shortHex.charAt(1) + shortHex.charAt(1) + shortHex.charAt(2) + shortHex.charAt(2);
+  }
+
+  return /^#[a-fA-F0-9]{6}$/.test(raw) ? raw.toLowerCase() : fallback;
+}
+
+function mixHexColors(baseColor: string, mixColor: string, ratio: number): string {
+  var clampedRatio = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
+  var base = normalizeHexColor(baseColor, '#000000');
+  var mix = normalizeHexColor(mixColor, '#ffffff');
+
+  var br = parseInt(base.slice(1, 3), 16);
+  var bg = parseInt(base.slice(3, 5), 16);
+  var bb = parseInt(base.slice(5, 7), 16);
+
+  var mr = parseInt(mix.slice(1, 3), 16);
+  var mg = parseInt(mix.slice(3, 5), 16);
+  var mb = parseInt(mix.slice(5, 7), 16);
+
+  var r = Math.round(br * (1 - clampedRatio) + mr * clampedRatio);
+  var g = Math.round(bg * (1 - clampedRatio) + mg * clampedRatio);
+  var b = Math.round(bb * (1 - clampedRatio) + mb * clampedRatio);
+
+  return (
+    '#' +
+    r.toString(16).padStart(2, '0') +
+    g.toString(16).padStart(2, '0') +
+    b.toString(16).padStart(2, '0')
+  );
+}
+
+function resolveTheme(theme: BwaiThemeMeta = {}): BwaiResolvedTheme {
+  var fontPairId = String(theme.fontPair || DEFAULT_THEME_FONT_PAIR_ID);
+  var fontPair = BWAI_THEME_FONT_PRESETS.find(function (preset) {
+    return preset.id === fontPairId;
+  }) || BWAI_THEME_FONT_PRESETS[0];
+
+  var primary = normalizeHexColor(theme.accentColor, DEFAULT_THEME_PRIMARY);
+  var mid = mixHexColors(primary, '#ffffff', 0.68);
+  var soft = mixHexColors(primary, '#ffffff', 0.17);
+  var faint = mixHexColors(primary, '#ffffff', 0.07);
+
+  var r = parseInt(primary.slice(1, 3), 16);
+  var g = parseInt(primary.slice(3, 5), 16);
+  var b = parseInt(primary.slice(5, 7), 16);
+  var shadow = '0 8px 32px rgba(' + r + ',' + g + ',' + b + ',.24)';
+
+  return {
+    fontHref: fontPair.googleFontsUrl,
+    serifVar: fontPair.serifVar,
+    sansVar: fontPair.sansVar,
+    primary: primary,
+    mid: mid,
+    soft: soft,
+    faint: faint,
+    shadow: shadow
+  };
+}
+
+export function resolveBwaiThemeFontHref(theme: BwaiThemeMeta = {}): string {
+  return resolveTheme(theme).fontHref;
+}
+
+export function buildBwaiThemeStyleCss(theme: BwaiThemeMeta = {}): string {
+  var resolved = resolveTheme(theme);
+  return [
+    ':root {',
+    '  --lp-primary: ' + resolved.primary + ';',
+    '  --lp-primary-mid: ' + resolved.mid + ';',
+    '  --lp-primary-soft: ' + resolved.soft + ';',
+    '  --lp-primary-faint: ' + resolved.faint + ';',
+    '  --lp-shadow-primary: ' + resolved.shadow + ';',
+    "  --lp-serif: '" + resolved.serifVar + "', Georgia, serif;",
+    "  --lp-sans: '" + resolved.sansVar + "', 'Segoe UI', system-ui, sans-serif;",
+    '}'
+  ].join('\n');
+}
+
 export const STATIC_SHELL_CSS = `
 :root {
   --cie-primary-bg: #ffffff;
@@ -761,14 +905,14 @@ body {
 /* Entrance animation */
 .lp-hero, .lp-trust, .lp-stats-bar, .lp-props, .lp-how,
 .lp-showcase, .lp-proof, .lp-guarantee,
-.lp-faq, .lp-cta-final {
+.lp-faq, .lp-cta-final, .lp-products-list {
   opacity: 0;
   transform: translateY(24px);
   transition: opacity .55s ease, transform .55s ease;
 }
 .lp-hero.in-view, .lp-trust.in-view, .lp-stats-bar.in-view, .lp-props.in-view, .lp-how.in-view,
 .lp-showcase.in-view, .lp-proof.in-view, .lp-guarantee.in-view,
-.lp-faq.in-view, .lp-cta-final.in-view {
+.lp-faq.in-view, .lp-cta-final.in-view, .lp-products-list.in-view {
   opacity: 1;
   transform: none;
 }
@@ -1428,6 +1572,61 @@ export const FOOTER_HTML = `<footer id="PageFooter" class="footer">
   </div>
 </footer>`;
 
+export const SECTION_IN_VIEW_RUNTIME_SCRIPT = `(function () {
+  var GLOBAL_KEY = 'CIESectionInViewRuntime';
+  var SECTION_SELECTOR = '.lp-hero,.lp-trust,.lp-stats-bar,.lp-props,.lp-how,.lp-showcase,.lp-proof,.lp-guarantee,.lp-faq,.lp-cta-final,.lp-products-list';
+
+  function revealAll(root) {
+    var host = root && root.querySelectorAll ? root : document;
+    var sections = host.querySelectorAll(SECTION_SELECTOR);
+    sections.forEach(function (section) {
+      section.classList.add('in-view');
+    });
+  }
+
+  function hydrate(root) {
+    var host = root && root.querySelectorAll ? root : document;
+    var sections = host.querySelectorAll(SECTION_SELECTOR);
+    if (!sections.length) return;
+
+    if (typeof window === 'undefined' || !('IntersectionObserver' in window)) {
+      revealAll(host);
+      return;
+    }
+
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('in-view');
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.07 });
+
+    sections.forEach(function (section) {
+      if (section.classList.contains('in-view')) return;
+      observer.observe(section);
+    });
+
+    // Safety fallback: never leave sections hidden due missing/overwritten custom JS.
+    window.setTimeout(function () {
+      sections.forEach(function (section) {
+        section.classList.add('in-view');
+      });
+      observer.disconnect();
+    }, 2200);
+  }
+
+  window[GLOBAL_KEY] = { hydrate: hydrate };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      hydrate(document);
+    });
+  } else {
+    hydrate(document);
+  }
+})();`;
+
 export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
   var GLOBAL_KEY = 'CIEProductsListRuntime';
   var STATE_KEY = '__cieProductsListState';
@@ -1466,6 +1665,19 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       .filter(function (num, index, all) { return Number.isFinite(num) && num > 0 && all.indexOf(num) === index; });
   }
 
+  function parseBooleanAttr(value, fallback) {
+    if (value === undefined || value === null || value === '') return fallback;
+    var normalized = String(value).trim().toLowerCase();
+    if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+    if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+    return fallback;
+  }
+
+  function parseOptionalLimit(root) {
+    if (!root || typeof root.hasAttribute !== 'function' || !root.hasAttribute('data-cie-limit')) return null;
+    return parsePositiveNumber(root.getAttribute('data-cie-limit'), null);
+  }
+
   function normalizeMode(value) {
     return value === 'request' ? 'request' : 'preset';
   }
@@ -1483,6 +1695,63 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
     if (Array.isArray(payload)) return payload;
     if (payload && typeof payload === 'object' && Array.isArray(payload.results)) return payload.results;
     return [];
+  }
+
+  function normalizeLooseText(value) {
+    var text = String(value || '').trim().toLowerCase();
+    if (!text) return '';
+    text = text
+      .replace(/æ/g, 'ae')
+      .replace(/ø/g, 'o')
+      .replace(/å/g, 'a');
+    if (typeof text.normalize === 'function') {
+      text = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+    return text
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function findCategoryByName(categories, expectedName) {
+    var needle = normalizeLooseText(expectedName);
+    if (!needle || !Array.isArray(categories) || !categories.length) return null;
+
+    for (var i = 0; i < categories.length; i++) {
+      var category = categories[i];
+      var hay = normalizeLooseText(category && category.name);
+      if (!hay) continue;
+      if (hay === needle || hay.indexOf(needle) !== -1 || needle.indexOf(hay) !== -1) return category;
+    }
+
+    return null;
+  }
+
+  function applyCategorySelectionPolicy(state) {
+    var predefined = state && state.config ? String(state.config.predefinedCategory || '').trim() : '';
+
+    if (!predefined) {
+      state.predefinedCategoryMissing = false;
+      if (!state.selectedCategoryId && state.categories.length) {
+        state.selectedCategoryId = parsePositiveNumber(state.categories[0] && state.categories[0].id, null);
+      }
+      return;
+    }
+
+    var matchedCategory = findCategoryByName(state.categories, predefined);
+    var matchedCategoryId = parsePositiveNumber(matchedCategory && matchedCategory.id, null);
+
+    if (!matchedCategoryId) {
+      state.predefinedCategoryMissing = true;
+      state.selectedCategoryId = null;
+      state.products = [];
+      state.filters = null;
+      state.allergens = [];
+      return;
+    }
+
+    state.predefinedCategoryMissing = false;
+    state.selectedCategoryId = matchedCategoryId;
   }
 
   function buildUrl(path, params) {
@@ -1579,15 +1848,18 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
   }
 
   function resolveConfig(root) {
+    var mode = normalizeMode(root.getAttribute('data-cie-mode'));
     return {
-      mode: normalizeMode(root.getAttribute('data-cie-mode')),
+      mode: mode,
       refType: normalizeRefType(root.getAttribute('data-cie-ref-type')),
       refName: (root.getAttribute('data-cie-ref-name') || '').trim(),
       bakeryId: parsePositiveNumber(root.getAttribute('data-cie-bakery-id'), null),
       categoryId: parsePositiveNumber(root.getAttribute('data-cie-category-id'), null),
       country: (root.getAttribute('data-cie-country') || 'NO').trim() || 'NO',
       lang: (root.getAttribute('data-cie-lang') || 'no').trim() || 'no',
-      limit: parsePositiveNumber(root.getAttribute('data-cie-limit'), 8),
+      limit: parseOptionalLimit(root),
+      showSearch: parseBooleanAttr(root.getAttribute('data-cie-show-search'), mode === 'request'),
+      predefinedCategory: (root.getAttribute('data-cie-predefined-category') || '').trim(),
       allergenIds: parseIdList(root.getAttribute('data-cie-allergen-ids')),
       groupIds: parseIdList(root.getAttribute('data-cie-group-ids')),
       motive: normalizeMotive(root.getAttribute('data-cie-motive'))
@@ -1715,6 +1987,17 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
   }
 
   async function loadProductsData(state) {
+    if (state.predefinedCategoryMissing) {
+      state.error = '';
+      state.loading = false;
+      state.hasResolvedProductRequest = true;
+      state.products = [];
+      state.filters = null;
+      state.allergens = [];
+      render(state);
+      return;
+    }
+
     var common = buildCommonParams(state);
     if (!common) {
       state.error = 'Missing location or category for Products List.';
@@ -1747,7 +2030,8 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       var result = await Promise.all([filtersPromise, allergensPromise, productsPromise]);
       state.filters = result[0] || null;
       state.allergens = Array.isArray(result[1]) ? result[1] : [];
-      state.products = Array.isArray(result[2]) ? result[2].slice(0, state.config.limit) : [];
+      var allProducts = Array.isArray(result[2]) ? result[2] : [];
+      state.products = state.config.limit ? allProducts.slice(0, state.config.limit) : allProducts;
     } catch (error) {
       state.error = error instanceof Error ? error.message : 'Failed to load products.';
       state.products = [];
@@ -1793,9 +2077,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
 
     try {
       state.categories = await fetchCategories(state);
-      if (!state.selectedCategoryId && state.categories.length) {
-        state.selectedCategoryId = parsePositiveNumber(state.categories[0] && state.categories[0].id, null);
-      }
+      applyCategorySelectionPolicy(state);
       render(state);
       if (state.selectedCategoryId) {
         await loadProductsData(state);
@@ -1819,7 +2101,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       : null;
 
     var searchMarkup = '';
-    if (state.config.mode === 'request') {
+    if (state.config.showSearch) {
       searchMarkup = [
         '<div class="cie-products-list__search-area">',
         '<div class="cie-products-list__search-shell">',
@@ -1839,7 +2121,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
     }
 
     var tabsMarkup = '';
-    if (state.categories.length) {
+    if (state.categories.length && !state.config.predefinedCategory) {
       tabsMarkup = '<div class="cie-products-list__tabs">' + state.categories.map(function (category) {
         var id = parsePositiveNumber(category && category.id, null);
         if (!id) return '';
@@ -1886,8 +2168,12 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
         '</ul>';
     } else if (shouldShowSkeleton) {
       productsMarkup = buildProductsSkeletonMarkup(state);
+    } else if (!state.loading && !state.error && state.predefinedCategoryMissing) {
+      productsMarkup = '<div class="cie-products-list__empty">No products found for the predefined category.</div>';
     } else if (!state.loading && !state.error && state.config.mode === 'request' && !state.selectedRefName && !state.selectedBakeryId) {
-      productsMarkup = '<div class="cie-products-list__empty">Search for a city or bakery to see products.</div>';
+      productsMarkup = state.config.showSearch
+        ? '<div class="cie-products-list__empty">Search for a city or bakery to see products.</div>'
+        : '<div class="cie-products-list__empty">Set a default city or bakery, or enable search to load products.</div>';
     } else if (!state.loading && !state.error) {
       productsMarkup = '<div class="cie-products-list__empty">No products found for this selection.</div>';
     }
@@ -1966,6 +2252,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
     var categoryTabs = mount.querySelectorAll('[data-cie-pl-tab]');
     categoryTabs.forEach(function (button) {
       button.addEventListener('click', function () {
+        if (state.config.predefinedCategory) return;
         var categoryId = parsePositiveNumber(button.getAttribute('data-cie-pl-tab'), null);
         if (!categoryId || categoryId === state.selectedCategoryId) return;
         state.selectedCategoryId = categoryId;
@@ -2065,6 +2352,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       allergens: [],
       query: '',
       keywordResults: [],
+      predefinedCategoryMissing: false,
       selectedRefType: config.refType,
       selectedRefName: config.refName || '',
       selectedBakeryId: config.bakeryId,
@@ -2079,9 +2367,9 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       return;
     }
 
-    if (!state.selectedCategoryId && config.mode === 'preset') {
+    if (!state.selectedCategoryId && !config.predefinedCategory && config.mode === 'preset') {
       state.initializing = false;
-      state.error = 'Products List preset mode requires data-cie-category-id.';
+      state.error = 'Products List preset mode requires data-cie-category-id or data-cie-predefined-category.';
       render(state);
       return;
     }
@@ -2091,9 +2379,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
     try {
       if (state.selectedRefName || state.selectedBakeryId) {
         state.categories = await fetchCategories(state);
-        if (!state.selectedCategoryId && state.categories.length) {
-          state.selectedCategoryId = parsePositiveNumber(state.categories[0] && state.categories[0].id, null);
-        }
+        applyCategorySelectionPolicy(state);
       }
       render(state);
       if (state.selectedCategoryId && (state.selectedRefName || state.selectedBakeryId)) {
@@ -2136,7 +2422,12 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
  * Builds a standalone, publishable HTML document for a given page.
  * Does NOT include any BWAI editor scripts — this is the clean public version.
  */
-export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}, hiddenSections: string[] = []): string {
+export function buildPublishedDocument(
+  files: BwaiFiles,
+  seo: BwaiSeoMeta = {},
+  hiddenSections: string[] = [],
+  theme: BwaiThemeMeta = {}
+): string {
   const title = seo.title ?? 'Cake it Easy';
   const description = seo.description ?? '';
   const ogTitle = seo.ogTitle ?? title;
@@ -2145,6 +2436,8 @@ export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}, 
 
   const safeCss = files.css.replace(/<\/style>/gi, '<\\/style>');
   const safeJs = files.js.replace(/<\/script>/gi, '<\\/script>');
+  const themeCss = buildBwaiThemeStyleCss(theme).replace(/<\/style>/gi, '<\\/style>');
+  const themeFontHref = resolveBwaiThemeFontHref(theme);
   const hiddenCss = hiddenSections.length
     ? hiddenSections.map((id) => `[data-bwai-id="${id}"]{display:none!important}`).join('')
     : '';
@@ -2166,9 +2459,10 @@ export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}, 
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${esc(title)}</title>
     ${metaTags}
-    <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap" rel="stylesheet" />
+    <link id="BuildWithAiThemeFonts" href="${esc(themeFontHref)}" rel="stylesheet" />
     <style>${STATIC_SHELL_CSS}</style>
-    <style id="BuildWithAiContentStyle">${safeCss}</style>${hiddenCss ? `\n    <style>${hiddenCss}</style>` : ''}
+    <style id="BuildWithAiContentStyle">${safeCss}</style>
+    <style id="BuildWithAiThemeStyle">${themeCss}</style>${hiddenCss ? `\n    <style>${hiddenCss}</style>` : ''}
   </head>
   <body>
     ${HEADER_HTML}
@@ -2200,6 +2494,7 @@ export function buildPublishedDocument(files: BwaiFiles, seo: BwaiSeoMeta = {}, 
       })();
     </script>
 
+    <script id="CieSectionInViewRuntime">${SECTION_IN_VIEW_RUNTIME_SCRIPT}</script>
     <script id="CieProductsListRuntime">${PRODUCTS_LIST_RUNTIME_SCRIPT}</script>
     <script id="BuildWithAiContentScript">${safeJs}</script>
   </body>

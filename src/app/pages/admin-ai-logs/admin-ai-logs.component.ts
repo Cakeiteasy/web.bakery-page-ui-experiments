@@ -2,7 +2,7 @@ import { CommonModule, DatePipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-import { BwaiAiLog, BwaiAiLogEditResult } from '../../models/bwai-ai-log.model';
+import { BwaiAiLog } from '../../models/bwai-ai-log.model';
 import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
 
 @Component({
@@ -86,6 +86,82 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
                         <pre class="detail-pre">{{ log.lastUserMessage || '(empty)' }}</pre>
                       </section>
 
+                      @if (log.requestMeta) {
+                        <section class="detail-section">
+                          <h3 class="detail-heading">Request meta</h3>
+                          <div class="meta-grid">
+                            <span>Messages: {{ log.requestMeta.messageCount }}</span>
+                            <span>User: {{ log.requestMeta.userMessageCount }}</span>
+                            <span>Assistant: {{ log.requestMeta.assistantMessageCount }}</span>
+                            <span>Attachments: {{ log.requestMeta.attachmentCount }}</span>
+                            <span>Style override: {{ log.requestMeta.allowGlobalStyleOverride ? 'yes' : 'no' }}</span>
+                          </div>
+                        </section>
+                      }
+
+                      <section class="detail-section">
+                        <h3 class="detail-heading">Proposed by AI</h3>
+                        @if (log.assistantText) {
+                          <pre class="detail-pre">{{ log.assistantText }}</pre>
+                        }
+                        @if (log.edits.length) {
+                          <div class="edit-list">
+                            @for (edit of log.edits; track $index) {
+                              <div class="edit-item">
+                                <div class="edit-item-header">
+                                  <span class="edit-file">{{ edit.file || '(unknown file)' }}</span>
+                                  <span class="edit-mode">{{ edit.mode || 'replace' }}</span>
+                                </div>
+                                @if (edit.search) {
+                                  <pre class="edit-search">{{ edit.search }}</pre>
+                                }
+                                @if (edit.value) {
+                                  <pre class="edit-value">{{ truncate(edit.value, 1200) }}</pre>
+                                }
+                              </div>
+                            }
+                          </div>
+                        } @else {
+                          <p class="detail-none">No parsed proposed edits were captured for this request.</p>
+                        }
+                        @if (log.responseParseError) {
+                          <p class="detail-rejection">Response parse error: {{ log.responseParseError }}</p>
+                        }
+                      </section>
+
+                      <section class="detail-section">
+                        <h3 class="detail-heading">Context: selected elements</h3>
+                        @if (log.selectedTargets?.length) {
+                          <div class="target-list">
+                            @for (target of log.selectedTargets; track $index) {
+                              <div class="target-item">
+                                <div class="target-item__head">
+                                  <span class="target-item__label">{{ target.label || 'Selected section' }}</span>
+                                  <span class="target-item__ref">{{ target.reference || target.selector || '—' }}</span>
+                                </div>
+                                <div class="target-item__meta">
+                                  <span>Message ID: {{ target.messageId || '—' }}</span>
+                                  <span>Position: {{ target.sectionIndex + 1 }} / {{ target.totalSections }}</span>
+                                  <span>bwaiId: {{ target.bwaiId || '—' }}</span>
+                                </div>
+                                <code class="target-item__selector">{{ target.selector || '(empty selector)' }}</code>
+                                @if (target.outerHtml) {
+                                  <details class="target-html">
+                                    <summary>Section HTML snapshot</summary>
+                                    <pre class="detail-pre">{{ target.outerHtml }}</pre>
+                                  </details>
+                                }
+                                @if (target.outerHtmlTruncated) {
+                                  <p class="detail-note">HTML snapshot was truncated to 8,000 characters.</p>
+                                }
+                              </div>
+                            }
+                          </div>
+                        } @else {
+                          <p class="detail-none">No selected-element context captured.</p>
+                        }
+                      </section>
+
                       @if (log.warnings?.length) {
                         <section class="detail-section">
                           <h3 class="detail-heading">Warnings</h3>
@@ -106,7 +182,7 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
 
                       <section class="detail-section">
                         <h3 class="detail-heading">
-                          Edits
+                          Patch result
                           @if (log.applyResults?.length) {
                             <span class="edit-summary">
                               {{ matchedCount(log) }} matched,
@@ -135,6 +211,27 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
                         } @else {
                           <p class="detail-none">Apply results not yet recorded.</p>
                         }
+                        @if (log.touchedFiles?.length) {
+                          <p class="detail-inline-meta">Touched files: {{ (log.touchedFiles ?? []).join(', ') }}</p>
+                        }
+                        <div class="hash-grid">
+                          @if (log.beforeFileHashes) {
+                            <div class="hash-box">
+                              <strong>Before hashes</strong>
+                              <span>html: <code>{{ log.beforeFileHashes.html }}</code></span>
+                              <span>css: <code>{{ log.beforeFileHashes.css }}</code></span>
+                              <span>js: <code>{{ log.beforeFileHashes.js }}</code></span>
+                            </div>
+                          }
+                          @if (log.afterFileHashes) {
+                            <div class="hash-box">
+                              <strong>After hashes</strong>
+                              <span>html: <code>{{ log.afterFileHashes.html }}</code></span>
+                              <span>css: <code>{{ log.afterFileHashes.css }}</code></span>
+                              <span>js: <code>{{ log.afterFileHashes.js }}</code></span>
+                            </div>
+                          }
+                        </div>
                       </section>
 
                       <section class="detail-section detail-meta">
@@ -304,6 +401,16 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
     .detail-list { margin: 0; padding-left: 20px; font-size: 0.85rem; }
     .detail-rejection { margin: 0; color: #721c24; font-size: 0.85rem; }
     .detail-none { margin: 0; color: #888; font-size: 0.85rem; font-style: italic; }
+    .detail-note { margin: 8px 0 0; color: #666; font-size: 0.78rem; }
+    .detail-inline-meta { margin: 10px 0 0; color: #666; font-size: 0.8rem; }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 8px;
+      font-size: 0.82rem;
+      color: #555;
+    }
 
     .edit-list { display: flex; flex-direction: column; gap: 8px; }
 
@@ -357,11 +464,100 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
       max-height: 120px;
       overflow-y: auto;
     }
+    .edit-value {
+      background: #f6f8fb;
+      border: 1px solid #d8e1ee;
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 6px 0 0;
+      max-height: 180px;
+      overflow-y: auto;
+    }
 
     .edit-error {
       margin: 6px 0 0;
       font-size: 0.8rem;
       color: #721c24;
+    }
+
+    .target-list { display: flex; flex-direction: column; gap: 10px; }
+    .target-item {
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      background: #fafafa;
+      padding: 10px 12px;
+    }
+    .target-item__head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .target-item__label {
+      font-weight: 600;
+      color: #2f2f2f;
+      font-size: 0.84rem;
+    }
+    .target-item__ref {
+      font-size: 0.78rem;
+      color: #666;
+      font-family: monospace;
+    }
+    .target-item__meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: #666;
+      font-size: 0.75rem;
+      margin-bottom: 6px;
+    }
+    .target-item__selector {
+      display: inline-block;
+      font-family: monospace;
+      font-size: 0.76rem;
+      background: #f0f0f0;
+      border-radius: 4px;
+      padding: 2px 6px;
+      color: #444;
+      margin-bottom: 6px;
+      max-width: 100%;
+      word-break: break-all;
+    }
+    .target-html summary {
+      cursor: pointer;
+      color: #555;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .hash-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .hash-box {
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      background: #fafafa;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.78rem;
+      color: #555;
+    }
+    .hash-box code {
+      font-family: monospace;
+      font-size: 0.75rem;
+      background: #f0f0f0;
+      border-radius: 3px;
+      padding: 1px 4px;
     }
 
     .detail-meta {
@@ -433,6 +629,12 @@ export class AdminAiLogsComponent implements OnInit {
 
   unmatchedCount(log: BwaiAiLog): number {
     return log.applyResults?.filter(r => r.status !== 'matched').length ?? 0;
+  }
+
+  truncate(value: string | null | undefined, maxLength = 1200): string {
+    if (!value) return '';
+    if (value.length <= maxLength) return value;
+    return value.slice(0, maxLength) + '\n…(truncated)';
   }
 
   private async loadLogs(options?: { append: boolean }): Promise<void> {
