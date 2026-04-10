@@ -63,6 +63,27 @@ const SIDEBAR_WIDTH_DEFAULT = 360;
 const SIDEBAR_WIDTH_MIN = 280;
 const SIDEBAR_WIDTH_MAX = 720;
 const MOBILE_SIDEBAR_BREAKPOINT = 1100;
+const SECTION_CAPTURE_PADDING_PX = 70;
+const SECTION_CAPTURE_TIMEOUT_MS = 20_000;
+const SECTION_CAPTURE_PREPARE_DEBOUNCE_MS = 180;
+const SECTION_CAPTURE_WAIT_ON_SEND_MS = 1_500;
+const SECTION_CAPTURE_MAX_UPLOAD_WIDTH_PX = 1440;
+const SECTION_CAPTURE_JPEG_AREA_THRESHOLD = 2_200_000;
+const STYLE_EDITOR_DEFAULT_TEXT_COLOR = '#2a2018';
+const STYLE_EDITOR_DEFAULT_BG_COLOR = '#ffffff';
+const STYLE_EDITOR_DEFAULT_DRAFT: BwaiStyleDraft = {
+  textColor: STYLE_EDITOR_DEFAULT_TEXT_COLOR,
+  backgroundColor: STYLE_EDITOR_DEFAULT_BG_COLOR,
+  fontSizePx: null,
+  fontWeight: '',
+  display: '',
+  textAlign: '',
+  justifyContent: '',
+  alignItems: '',
+  paddingPx: null,
+  marginPx: null,
+  borderRadiusPx: null
+};
 
 export interface SelectedSection {
   selector: string;     // precise selector for runtime DOM targeting (data-bwai-id based)
@@ -72,6 +93,75 @@ export interface SelectedSection {
   sectionIndex: number;
   totalSections: number;
   outerHtml: string;
+}
+
+interface BwaiSectionCaptureResult {
+  dataUrl: string;
+  mimeType: string;
+  width: number;
+  height: number;
+}
+
+type BwaiSectionCaptureFailureReason =
+  | 'timeout'
+  | 'renderer-not-loaded'
+  | 'section-not-found'
+  | 'tainted-canvas'
+  | 'render-failed';
+
+interface BwaiPreparedSectionCapture {
+  status: 'idle' | 'preparing' | 'ready' | 'failed';
+  bwaiId: string | null;
+  revision: number;
+  dataUrl?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  reason?: BwaiSectionCaptureFailureReason;
+  errorMessage?: string;
+  updatedAt: number;
+}
+
+interface BwaiSectionCapturePendingRequest {
+  resolve: (result: BwaiSectionCaptureResult) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+interface BwaiStyleEditorTarget {
+  styleId: string;
+  kind: BwaiStyleTargetKind;
+  tag: string;
+  label: string;
+  sectionLabel: string;
+  reference: string;
+}
+
+type BwaiStyleTargetKind = 'generic' | 'link' | 'image';
+
+interface BwaiStyleDraft {
+  textColor: string;
+  backgroundColor: string;
+  fontSizePx: number | null;
+  fontWeight: string;
+  display: string;
+  textAlign: string;
+  justifyContent: string;
+  alignItems: string;
+  paddingPx: number | null;
+  marginPx: number | null;
+  borderRadiusPx: number | null;
+}
+
+interface BwaiLinkDraft {
+  href: string;
+  openInNewTab: boolean;
+}
+
+interface BwaiImageDraft {
+  src: string;
+  alt: string;
 }
 
 
@@ -129,8 +219,25 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   readonly showGenerationSettings = signal<boolean>(false);
   readonly showImagePicker = signal<boolean>(false);
   readonly activeTab = signal<'chat' | 'versions'>('chat');
+  readonly showStyleEditor = signal<boolean>(false);
+  readonly styleEditorTarget = signal<BwaiStyleEditorTarget | null>(null);
+  readonly styleBaselineDraft = signal<BwaiStyleDraft>({ ...STYLE_EDITOR_DEFAULT_DRAFT });
+  readonly styleDraft = signal<BwaiStyleDraft>({ ...STYLE_EDITOR_DEFAULT_DRAFT });
+  readonly styleDirtyFields = signal<Partial<Record<keyof BwaiStyleDraft, true>>>({});
+  readonly styleLinkBaseline = signal<BwaiLinkDraft | null>(null);
+  readonly styleLinkDraft = signal<BwaiLinkDraft | null>(null);
+  readonly styleLinkDirtyFields = signal<Partial<Record<keyof BwaiLinkDraft, true>>>({});
+  readonly styleImageBaseline = signal<BwaiImageDraft | null>(null);
+  readonly styleImageDraft = signal<BwaiImageDraft | null>(null);
+  readonly styleImageDirtyFields = signal<Partial<Record<keyof BwaiImageDraft, true>>>({});
   readonly copiedToast = signal<boolean>(false);
   readonly uploadingCount = signal<number>(0);
+  readonly preparedSectionCapture = signal<BwaiPreparedSectionCapture>({
+    status: 'idle',
+    bwaiId: null,
+    revision: 0,
+    updatedAt: Date.now()
+  });
   readonly systemPromptOverride = signal<string | null>(
     localStorage.getItem(BWAI_SYSTEM_PROMPT_LS_KEY) || null
   );
@@ -147,6 +254,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private routeParamSub?: ReturnType<typeof this.route.paramMap.subscribe>;
   private copiedToastTimeout?: ReturnType<typeof setTimeout>;
   private skipNextIframePatch = false;
+  private readonly sectionCaptureContentRevision = signal<number>(0);
+  private readonly pendingSectionCaptureRequests = new Map<string, BwaiSectionCapturePendingRequest>();
+  private sectionCapturePrepareDebounceTimer?: ReturnType<typeof setTimeout>;
+  private sectionCapturePrepareInFlight: { bwaiId: string; revision: number } | null = null;
 
   readonly selectedModel = computed(() => {
     const selected = this.modelOptions.find((option) => option.key === this.selectedModelKey());
@@ -182,6 +293,58 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     const sel = this.selectedSection();
     return sel ? this.hiddenSections().includes(sel.bwaiId) : false;
   });
+
+  readonly styleDisplayOptions: Array<{ value: string; label: string }> = [
+    { value: '', label: 'Default' },
+    { value: 'block', label: 'Block' },
+    { value: 'inline-block', label: 'Inline Block' },
+    { value: 'inline', label: 'Inline' },
+    { value: 'flex', label: 'Flex' },
+    { value: 'grid', label: 'Grid' },
+    { value: 'none', label: 'None' }
+  ];
+
+  readonly styleTextAlignOptions: Array<{ value: string; label: string }> = [
+    { value: '', label: 'Default' },
+    { value: 'left', label: 'Left' },
+    { value: 'center', label: 'Center' },
+    { value: 'right', label: 'Right' },
+    { value: 'justify', label: 'Justify' }
+  ];
+
+  readonly styleFontWeightOptions: Array<{ value: string; label: string }> = [
+    { value: '', label: 'Default' },
+    { value: '300', label: '300' },
+    { value: '400', label: '400' },
+    { value: '500', label: '500' },
+    { value: '600', label: '600' },
+    { value: '700', label: '700' },
+    { value: '800', label: '800' },
+    { value: '900', label: '900' }
+  ];
+
+  readonly styleJustifyOptions: Array<{ value: string; label: string }> = [
+    { value: '', label: 'Default' },
+    { value: 'flex-start', label: 'Start' },
+    { value: 'center', label: 'Center' },
+    { value: 'flex-end', label: 'End' },
+    { value: 'space-between', label: 'Space Between' },
+    { value: 'space-around', label: 'Space Around' },
+    { value: 'space-evenly', label: 'Space Evenly' }
+  ];
+
+  readonly styleAlignItemsOptions: Array<{ value: string; label: string }> = [
+    { value: '', label: 'Default' },
+    { value: 'stretch', label: 'Stretch' },
+    { value: 'flex-start', label: 'Start' },
+    { value: 'center', label: 'Center' },
+    { value: 'flex-end', label: 'End' },
+    { value: 'baseline', label: 'Baseline' }
+  ];
+
+  readonly styleAlignmentControlsEnabled = computed(() =>
+    this.isFlexOrGridDisplay(this.styleDraft().display)
+  );
 
   // Expose window to template for slug preview in SEO modal
   readonly window = window;
@@ -220,6 +383,39 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         if (el) el.scrollTop = el.scrollHeight;
       }, 0);
     });
+
+    // Prepare section captures ahead of send to avoid synchronous wait/failure in the send path.
+    effect(
+      () => {
+        const selected = this.selectedSection();
+        const revision = this.sectionCaptureContentRevision();
+
+        this.cancelPreparedSectionCaptureDebounce();
+        if (!selected) {
+          this.preparedSectionCapture.set({
+            status: 'idle',
+            bwaiId: null,
+            revision,
+            updatedAt: Date.now()
+          });
+          return;
+        }
+
+        this.preparedSectionCapture.set({
+          status: 'idle',
+          bwaiId: selected.bwaiId || null,
+          revision,
+          updatedAt: Date.now()
+        });
+
+        if (!this.iframeReady) {
+          return;
+        }
+
+        this.schedulePreparedSectionCapture(selected, revision, 'selection-or-revision');
+      },
+      { allowSignalWrites: true }
+    );
   }
 
   private readonly previewMessageListener = (event: MessageEvent): void => {
@@ -234,16 +430,74 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       reference?: string;
       bwaiId?: string;
       label?: string;
+      styleId?: string;
+      tag?: string;
+      sectionLabel?: string;
       sectionIndex?: number;
       totalSections?: number;
       outerHtml?: string;
       action?: string;
+      html?: string;
+      sectionType?: string;
+      styles?: Record<string, unknown>;
+      kind?: string;
+      link?: Record<string, unknown>;
+      image?: Record<string, unknown>;
+      requestId?: string;
+      success?: boolean;
+      dataUrl?: string;
+      mimeType?: string;
+      width?: number;
+      height?: number;
+      reason?: string;
+      error?: string;
     };
+
+    if (payload.type === 'bwai-capture-result') {
+      const requestId = payload.requestId ?? '';
+      const pending = this.pendingSectionCaptureRequests.get(requestId);
+      if (!pending) {
+        return;
+      }
+
+      clearTimeout(pending.timeoutId);
+      this.pendingSectionCaptureRequests.delete(requestId);
+
+      if (payload.success && payload.dataUrl) {
+        pending.resolve({
+          dataUrl: payload.dataUrl,
+          mimeType: payload.mimeType ?? 'image/png',
+          width: Number(payload.width ?? 0),
+          height: Number(payload.height ?? 0)
+        });
+      } else {
+        pending.reject(
+          this.createSectionCaptureError(
+            this.normalizeSectionCaptureReason(payload.reason, payload.error),
+            payload.error ?? 'Section image capture failed.'
+          )
+        );
+      }
+      return;
+    }
 
     if (payload.type === 'build-with-ai-preview-error') {
       if (payload.message) {
         this.setError('preview', payload.message);
       }
+      return;
+    }
+
+    if (payload.type === 'bwai-style-editor-open') {
+      this.openStyleEditor(payload);
+      return;
+    }
+
+    if (payload.type === 'bwai-style-editor-invalidated') {
+      if (this.showStyleEditor()) {
+        this.resetStyleEditor();
+      }
+      this.setError('preview', payload.message || 'Style target changed. Please select an element again.');
       return;
     }
 
@@ -261,20 +515,21 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
 
     if (payload.type === 'bwai-inline-edit-save') {
-      const newHtml = this.normalizeHtml(String((payload as any).html ?? ''));
+      const newHtml = this.normalizeHtml(String(payload.html ?? ''));
       const { html: htmlWithIds } = this.ensureSectionIds(newHtml);
       const updated = { ...this.files(), html: htmlWithIds };
       const validation = this.syntaxValidator.validate(updated);
       if (validation.valid) {
         this.skipNextIframePatch = true;
         this.files.set(updated);
+        this.markSectionCaptureContentChanged('inline-edit-save');
         void this.persistToMongo({ currentFiles: updated });
       }
       return;
     }
 
     if (payload.type === 'bwai-insert') {
-      this.onInsertSection(String((payload as any).sectionType ?? 'custom'));
+      this.onInsertSection(String(payload.sectionType ?? 'custom'));
       return;
     }
 
@@ -321,6 +576,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     window.removeEventListener('message', this.previewMessageListener);
+    this.rejectPendingSectionCaptureRequests('Section capture was interrupted.');
+    this.cancelPreparedSectionCaptureDebounce();
     this.onSidebarResizePointerUp();
     this.routeParamSub?.unsubscribe();
     if (this.copiedToastTimeout) clearTimeout(this.copiedToastTimeout);
@@ -334,6 +591,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.activeError.set(null);
     this.activeTab.set('chat');
     this.versions.set([]);
+    this.resetStyleEditor();
 
     try {
       const [page, allPages] = await Promise.all([
@@ -349,6 +607,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       const { html: htmlWithIds, changed: idsAdded } = this.ensureSectionIds(normalized);
       const files = { ...rawFiles, html: htmlWithIds };
       this.files.set(files);
+      this.markSectionCaptureContentChanged('page-loaded');
       if (idsAdded) {
         void this.persistToMongo({ currentFiles: files });
       }
@@ -583,6 +842,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       const { html: restoredHtmlWithIds } = this.ensureSectionIds(this.normalizeHtml(restoredFiles.html));
       const files = { ...restoredFiles, html: restoredHtmlWithIds };
       this.files.set(files);
+      this.markSectionCaptureContentChanged('version-restored');
       this.currentPage.update((p) => p ? { ...p, currentFiles: files } : p);
     } catch {
       this.setError('api', 'Failed to restore version.');
@@ -701,6 +961,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         this.showSeoModal.set(false);
       } else if (this.showNewPageDialog()) {
         this.showNewPageDialog.set(false);
+      } else if (this.showStyleEditor()) {
+        this.onCancelStyleEditor();
       } else if (this.selectedSection()) {
         this.onDeselectSection();
       }
@@ -720,6 +982,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
   onIframeLoad(): void {
     this.iframeReady = true;
+    this.markSectionCaptureContentChanged('iframe-loaded');
 
     const win = this.previewIframe?.nativeElement.contentWindow;
     if (!win) return;
@@ -745,11 +1008,466 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   }
 
   onDeselectSection(): void {
+    if (this.showStyleEditor()) {
+      this.onCancelStyleEditor();
+    }
     this.selectedSection.set(null);
     this.previewIframe?.nativeElement.contentWindow?.postMessage(
       { type: 'bwai-highlight', selector: null, bwaiId: null },
       '*'
     );
+  }
+
+  onStyleFieldChange(field: keyof BwaiStyleDraft, rawValue: unknown): void {
+    if (!this.styleEditorTarget()) {
+      return;
+    }
+
+    const next = { ...this.styleDraft() };
+
+    if (
+      field === 'fontSizePx' ||
+      field === 'paddingPx' ||
+      field === 'marginPx' ||
+      field === 'borderRadiusPx'
+    ) {
+      (next as any)[field] = this.parsePxValue(rawValue);
+    } else if (field === 'textColor' || field === 'backgroundColor') {
+      const fallback = field === 'textColor' ? STYLE_EDITOR_DEFAULT_TEXT_COLOR : STYLE_EDITOR_DEFAULT_BG_COLOR;
+      (next as any)[field] = this.normalizeColorInput(rawValue, fallback);
+    } else {
+      (next as any)[field] = String(rawValue ?? '').trim();
+    }
+
+    const sanitized = this.sanitizeStyleDraft(next);
+    this.styleDraft.set(sanitized);
+    this.syncStyleDirtyField(field, sanitized);
+    if (field === 'display') {
+      this.syncStyleDirtyField('justifyContent', sanitized);
+      this.syncStyleDirtyField('alignItems', sanitized);
+    }
+    this.sendStylePreview();
+  }
+
+  onStyleLinkFieldChange(field: keyof BwaiLinkDraft, rawValue: unknown): void {
+    const current = this.styleLinkDraft();
+    if (!current) {
+      return;
+    }
+
+    const next: BwaiLinkDraft = { ...current };
+    if (field === 'openInNewTab') {
+      next.openInNewTab = this.parseBoolean(rawValue);
+    } else {
+      next.href = String(rawValue ?? '').trim();
+    }
+    const sanitized = this.sanitizeLinkDraft(next);
+    this.styleLinkDraft.set(sanitized);
+    this.syncStyleLinkDirtyField(field, sanitized);
+    this.sendStylePreview();
+  }
+
+  onStyleImageFieldChange(field: keyof BwaiImageDraft, rawValue: unknown): void {
+    const current = this.styleImageDraft();
+    if (!current) {
+      return;
+    }
+
+    const next: BwaiImageDraft = {
+      ...current,
+      [field]: String(rawValue ?? '').trim()
+    };
+    const sanitized = this.sanitizeImageDraft(next);
+    this.styleImageDraft.set(sanitized);
+    this.syncStyleImageDirtyField(field, sanitized);
+    this.sendStylePreview();
+  }
+
+  onSaveStyleEditor(): void {
+    const target = this.styleEditorTarget();
+    if (!target) {
+      this.resetStyleEditor();
+      return;
+    }
+
+    this.sendToIframe({
+      type: 'bwai-style-commit',
+      styleId: target.styleId,
+      ...this.buildStyleEditorPatchPayload()
+    });
+    this.resetStyleEditor();
+  }
+
+  onCancelStyleEditor(): void {
+    const target = this.styleEditorTarget();
+    if (target) {
+      this.sendToIframe({ type: 'bwai-style-revert', styleId: target.styleId });
+    }
+    this.resetStyleEditor();
+  }
+
+  private openStyleEditor(payload: {
+    styleId?: string;
+    kind?: string;
+    tag?: string;
+    label?: string;
+    sectionLabel?: string;
+    reference?: string;
+    styles?: Record<string, unknown>;
+    link?: Record<string, unknown>;
+    image?: Record<string, unknown>;
+  }): void {
+    if (!payload.styleId) {
+      return;
+    }
+
+    const existingTarget = this.styleEditorTarget();
+    if (existingTarget && existingTarget.styleId !== payload.styleId) {
+      this.sendToIframe({ type: 'bwai-style-revert', styleId: existingTarget.styleId });
+    }
+
+    const styles = payload.styles ?? {};
+    const styleBaseline = this.sanitizeStyleDraft({
+      textColor: this.normalizeColorInput(styles['textColor'], STYLE_EDITOR_DEFAULT_TEXT_COLOR),
+      backgroundColor: this.normalizeColorInput(styles['backgroundColor'], STYLE_EDITOR_DEFAULT_BG_COLOR),
+      fontSizePx: this.parsePxValue(styles['fontSizePx']),
+      fontWeight: String(styles['fontWeight'] ?? '').trim(),
+      display: String(styles['display'] ?? '').trim(),
+      textAlign: String(styles['textAlign'] ?? '').trim(),
+      justifyContent: String(styles['justifyContent'] ?? '').trim(),
+      alignItems: String(styles['alignItems'] ?? '').trim(),
+      paddingPx: this.parsePxValue(styles['paddingPx']),
+      marginPx: this.parsePxValue(styles['marginPx']),
+      borderRadiusPx: this.parsePxValue(styles['borderRadiusPx'])
+    });
+    const kind = this.normalizeStyleTargetKind(payload.kind, payload.tag);
+    const linkSource = payload.link ?? {};
+    const linkBaseline = kind === 'link'
+      ? this.sanitizeLinkDraft({
+        href: String(linkSource['href'] ?? ''),
+        openInNewTab: this.parseBoolean(linkSource['openInNewTab']) || String(linkSource['target'] ?? '').trim() === '_blank'
+      })
+      : null;
+    const imageSource = payload.image ?? {};
+    const imageBaseline = kind === 'image'
+      ? this.sanitizeImageDraft({
+        src: String(imageSource['src'] ?? ''),
+        alt: String(imageSource['alt'] ?? '')
+      })
+      : null;
+
+    this.styleEditorTarget.set({
+      styleId: payload.styleId,
+      kind,
+      tag: (payload.tag ?? 'element').toLowerCase(),
+      label: payload.label ?? 'Selected element',
+      sectionLabel: payload.sectionLabel ?? '',
+      reference: payload.reference ?? ''
+    });
+    this.styleBaselineDraft.set(styleBaseline);
+    this.styleDraft.set(styleBaseline);
+    this.styleDirtyFields.set({});
+    this.styleLinkBaseline.set(linkBaseline);
+    this.styleLinkDraft.set(linkBaseline);
+    this.styleLinkDirtyFields.set({});
+    this.styleImageBaseline.set(imageBaseline);
+    this.styleImageDraft.set(imageBaseline);
+    this.styleImageDirtyFields.set({});
+    this.showStyleEditor.set(true);
+    this.activeError.set(null);
+  }
+
+  private sendStylePreview(): void {
+    const target = this.styleEditorTarget();
+    if (!target) {
+      return;
+    }
+
+    this.sendToIframe({
+      type: 'bwai-style-preview',
+      styleId: target.styleId,
+      ...this.buildStyleEditorPatchPayload()
+    });
+  }
+
+  private buildStyleEditorPatchPayload(): {
+    styles?: Record<string, unknown>;
+    link?: Record<string, unknown>;
+    image?: Record<string, unknown>;
+  } {
+    const payload: {
+      styles?: Record<string, unknown>;
+      link?: Record<string, unknown>;
+      image?: Record<string, unknown>;
+    } = {};
+    const stylePatch = this.buildDirtyStylePatch();
+    if (Object.keys(stylePatch).length) {
+      payload.styles = stylePatch;
+    }
+    const linkPatch = this.buildDirtyLinkPatch();
+    if (linkPatch && Object.keys(linkPatch).length) {
+      payload.link = linkPatch;
+    }
+    const imagePatch = this.buildDirtyImagePatch();
+    if (imagePatch && Object.keys(imagePatch).length) {
+      payload.image = imagePatch;
+    }
+    return payload;
+  }
+
+  private buildDirtyStylePatch(): Record<string, unknown> {
+    const dirty = this.styleDirtyFields();
+    const draft = this.sanitizeStyleDraft(this.styleDraft());
+    const patch: Record<string, unknown> = {};
+    const addIfDirty = (field: keyof BwaiStyleDraft): void => {
+      if (!dirty[field]) {
+        return;
+      }
+      patch[field] = this.toIframeStyleFieldValue(field, draft[field]);
+    };
+
+    addIfDirty('textColor');
+    addIfDirty('backgroundColor');
+    addIfDirty('fontSizePx');
+    addIfDirty('fontWeight');
+    addIfDirty('display');
+    addIfDirty('textAlign');
+    addIfDirty('justifyContent');
+    addIfDirty('alignItems');
+    addIfDirty('paddingPx');
+    addIfDirty('marginPx');
+    addIfDirty('borderRadiusPx');
+
+    return patch;
+  }
+
+  private toIframeStyleFieldValue(field: keyof BwaiStyleDraft, value: BwaiStyleDraft[keyof BwaiStyleDraft]): unknown {
+    if (
+      field === 'fontSizePx' ||
+      field === 'paddingPx' ||
+      field === 'marginPx' ||
+      field === 'borderRadiusPx'
+    ) {
+      return this.parsePxValue(value);
+    }
+
+    if (field === 'textColor') {
+      return this.normalizeColorInput(value, STYLE_EDITOR_DEFAULT_TEXT_COLOR);
+    }
+
+    if (field === 'backgroundColor') {
+      return this.normalizeColorInput(value, STYLE_EDITOR_DEFAULT_BG_COLOR);
+    }
+
+    const stringValue = String(value ?? '').trim();
+    return stringValue || null;
+  }
+
+  private buildDirtyLinkPatch(): Record<string, unknown> | null {
+    const draft = this.styleLinkDraft();
+    if (!draft) {
+      return null;
+    }
+
+    const dirty = this.styleLinkDirtyFields();
+    const patch: Record<string, unknown> = {};
+    if (dirty.href) {
+      patch['href'] = draft.href;
+    }
+    if (dirty.openInNewTab) {
+      patch['openInNewTab'] = draft.openInNewTab;
+    }
+    return patch;
+  }
+
+  private buildDirtyImagePatch(): Record<string, unknown> | null {
+    const draft = this.styleImageDraft();
+    if (!draft) {
+      return null;
+    }
+
+    const dirty = this.styleImageDirtyFields();
+    const patch: Record<string, unknown> = {};
+    if (dirty.src) {
+      patch['src'] = draft.src;
+    }
+    if (dirty.alt) {
+      patch['alt'] = draft.alt;
+    }
+    return patch;
+  }
+
+  private syncStyleDirtyField(field: keyof BwaiStyleDraft, nextDraft: BwaiStyleDraft): void {
+    const baseline = this.styleBaselineDraft();
+    const isDirty = nextDraft[field] !== baseline[field];
+    this.styleDirtyFields.update((prev) => {
+      const next = { ...prev };
+      if (isDirty) {
+        next[field] = true;
+      } else {
+        delete next[field];
+      }
+      return next;
+    });
+  }
+
+  private syncStyleLinkDirtyField(field: keyof BwaiLinkDraft, nextDraft: BwaiLinkDraft): void {
+    const baseline = this.styleLinkBaseline();
+    const baselineValue = baseline ? baseline[field] : field === 'openInNewTab' ? false : '';
+    const isDirty = nextDraft[field] !== baselineValue;
+    this.styleLinkDirtyFields.update((prev) => {
+      const next = { ...prev };
+      if (isDirty) {
+        next[field] = true;
+      } else {
+        delete next[field];
+      }
+      return next;
+    });
+  }
+
+  private syncStyleImageDirtyField(field: keyof BwaiImageDraft, nextDraft: BwaiImageDraft): void {
+    const baseline = this.styleImageBaseline();
+    const baselineValue = baseline ? baseline[field] : '';
+    const isDirty = nextDraft[field] !== baselineValue;
+    this.styleImageDirtyFields.update((prev) => {
+      const next = { ...prev };
+      if (isDirty) {
+        next[field] = true;
+      } else {
+        delete next[field];
+      }
+      return next;
+    });
+  }
+
+  private sanitizeLinkDraft(draft: BwaiLinkDraft): BwaiLinkDraft {
+    return {
+      href: String(draft.href ?? '').trim(),
+      openInNewTab: Boolean(draft.openInNewTab)
+    };
+  }
+
+  private sanitizeImageDraft(draft: BwaiImageDraft): BwaiImageDraft {
+    return {
+      src: String(draft.src ?? '').trim(),
+      alt: String(draft.alt ?? '').trim()
+    };
+  }
+
+  private normalizeStyleTargetKind(kind: unknown, tag: unknown): BwaiStyleTargetKind {
+    const normalizedKind = String(kind ?? '').trim().toLowerCase();
+    if (normalizedKind === 'generic' || normalizedKind === 'link' || normalizedKind === 'image') {
+      return normalizedKind;
+    }
+    const normalizedTag = String(tag ?? '').trim().toLowerCase();
+    if (normalizedTag === 'a') {
+      return 'link';
+    }
+    if (normalizedTag === 'img') {
+      return 'image';
+    }
+    return 'generic';
+  }
+
+  private sanitizeStyleDraft(draft: BwaiStyleDraft): BwaiStyleDraft {
+    const normalized: BwaiStyleDraft = {
+      textColor: this.normalizeColorInput(draft.textColor, STYLE_EDITOR_DEFAULT_TEXT_COLOR),
+      backgroundColor: this.normalizeColorInput(draft.backgroundColor, STYLE_EDITOR_DEFAULT_BG_COLOR),
+      fontSizePx: this.parsePxValue(draft.fontSizePx),
+      fontWeight: String(draft.fontWeight ?? '').trim(),
+      display: String(draft.display ?? '').trim(),
+      textAlign: String(draft.textAlign ?? '').trim(),
+      justifyContent: String(draft.justifyContent ?? '').trim(),
+      alignItems: String(draft.alignItems ?? '').trim(),
+      paddingPx: this.parsePxValue(draft.paddingPx),
+      marginPx: this.parsePxValue(draft.marginPx),
+      borderRadiusPx: this.parsePxValue(draft.borderRadiusPx)
+    };
+
+    if (!this.isFlexOrGridDisplay(normalized.display)) {
+      normalized.justifyContent = '';
+      normalized.alignItems = '';
+    }
+
+    return normalized;
+  }
+
+  private isFlexOrGridDisplay(display: string): boolean {
+    return display === 'flex' || display === 'grid' || display === 'inline-flex' || display === 'inline-grid';
+  }
+
+  private parsePxValue(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return null;
+    }
+
+    return Math.max(0, Math.round(numeric * 100) / 100);
+  }
+
+  private parseBoolean(value: unknown): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+  }
+
+  private normalizeColorInput(value: unknown, fallback: string): string {
+    const raw = String(value ?? '').trim();
+    if (!raw) {
+      return fallback;
+    }
+
+    const hexMatch = raw.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hexMatch) {
+      const normalized = hexMatch[1].length === 3
+        ? hexMatch[1].split('').map((char) => char + char).join('')
+        : hexMatch[1];
+      return `#${normalized.toLowerCase()}`;
+    }
+
+    const rgbMatch = raw.match(
+      /^rgba?\(\s*([0-9]{1,3})\s*[, ]\s*([0-9]{1,3})\s*[, ]\s*([0-9]{1,3})(?:\s*[,/]\s*([0-9.]+)\s*)?\)$/i
+    );
+
+    if (!rgbMatch) {
+      return fallback;
+    }
+
+    const rgb = [rgbMatch[1], rgbMatch[2], rgbMatch[3]].map((part) => Number(part));
+    if (rgb.some((channel) => !Number.isFinite(channel) || channel < 0 || channel > 255)) {
+      return fallback;
+    }
+    if (rgbMatch[4] !== undefined) {
+      const alpha = Number(rgbMatch[4]);
+      if (Number.isFinite(alpha) && alpha <= 0) {
+        return fallback;
+      }
+    }
+
+    const [r, g, b] = rgb;
+    return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  private resetStyleEditor(): void {
+    this.showStyleEditor.set(false);
+    this.styleEditorTarget.set(null);
+    this.styleBaselineDraft.set({ ...STYLE_EDITOR_DEFAULT_DRAFT });
+    this.styleDraft.set({ ...STYLE_EDITOR_DEFAULT_DRAFT });
+    this.styleDirtyFields.set({});
+    this.styleLinkBaseline.set(null);
+    this.styleLinkDraft.set(null);
+    this.styleLinkDirtyFields.set({});
+    this.styleImageBaseline.set(null);
+    this.styleImageDraft.set(null);
+    this.styleImageDirtyFields.set({});
   }
 
   // ── Section reordering ─────────────────────────
@@ -841,19 +1559,34 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
 
     const selectedTarget = this.selectedSection();
+    const manualAttachments = [...this.pendingAttachments()];
+    let attachments = manualAttachments;
+    let sectionCaptureWarning: string | undefined;
+    this.activeError.set(null);
+
+    if (selectedTarget) {
+      const sectionCapture = await this.captureSelectedSectionAttachment(selectedTarget);
+      if (sectionCapture.attachment) {
+        attachments = [...manualAttachments, sectionCapture.attachment];
+      }
+      if (sectionCapture.warning) {
+        sectionCaptureWarning = sectionCapture.warning;
+      }
+    }
+
     const userMessage: BuildWithAiChatMessage = {
       id: this.createId('user'),
       role: 'user',
       text: this.draftMessage().trim(),
       createdAt: Date.now(),
-      attachments: this.pendingAttachments(),
-      ...(selectedTarget ? { target: this.toMessageTarget(selectedTarget) } : {})
+      attachments,
+      ...(selectedTarget ? { target: this.toMessageTarget(selectedTarget) } : {}),
+      ...(sectionCaptureWarning ? { sectionCaptureWarning } : {})
     };
 
     this.messages.update((messages) => [...messages, userMessage]);
     this.draftMessage.set('');
     this.pendingAttachments.set([]);
-    this.activeError.set(null);
     this.resetTextareaHeight();
 
     await this.generateAndApplyPatch();
@@ -863,6 +1596,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     this.activeError.set(null);
     this.pendingAttachments.set([]);
     this.selectedSection.set(null);
+    this.resetStyleEditor();
 
     this.messages.set([
       {
@@ -1105,6 +1839,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       const { html: patchedHtmlWithIds } = this.ensureSectionIds(patchedHtml);
       const nextFiles = { ...diffResult.files, html: patchedHtmlWithIds };
       this.files.set(nextFiles);
+      this.markSectionCaptureContentChanged('patch-applied');
       this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
 
       if (logId) {
@@ -1341,6 +2076,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
 
     this.files.update((f) => ({ ...f, html: container.innerHTML }));
+    this.markSectionCaptureContentChanged('sections-swapped');
   }
 
   private removeHtmlSection(index: number): void {
@@ -1350,6 +2086,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     if (index >= children.length) return;
     children[index].remove();
     this.files.update((f) => ({ ...f, html: container.innerHTML }));
+    this.markSectionCaptureContentChanged('section-removed');
   }
 
   /** Ensures every top-level section has a unique data-bwai-id attribute.
@@ -1426,6 +2163,484 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     if (uploaded.length) this.pendingAttachments.update((e) => [...e, ...uploaded]);
     if (failed.length) this.setError('api', `Failed to upload: ${failed.join(', ')}`);
+  }
+
+  private markSectionCaptureContentChanged(_trigger: string): void {
+    this.sectionCapturePrepareInFlight = null;
+    this.sectionCaptureContentRevision.update((current) => current + 1);
+  }
+
+  private cancelPreparedSectionCaptureDebounce(): void {
+    if (this.sectionCapturePrepareDebounceTimer) {
+      clearTimeout(this.sectionCapturePrepareDebounceTimer);
+      this.sectionCapturePrepareDebounceTimer = undefined;
+    }
+  }
+
+  private schedulePreparedSectionCapture(
+    section: SelectedSection,
+    revision: number,
+    trigger: string
+  ): void {
+    if (!section.bwaiId) {
+      return;
+    }
+
+    this.cancelPreparedSectionCaptureDebounce();
+    this.sectionCapturePrepareDebounceTimer = setTimeout(() => {
+      this.sectionCapturePrepareDebounceTimer = undefined;
+      void this.prepareSectionCapture(section, revision, trigger);
+    }, SECTION_CAPTURE_PREPARE_DEBOUNCE_MS);
+  }
+
+  private isSectionCaptureCurrent(section: SelectedSection, revision: number): boolean {
+    const selected = this.selectedSection();
+    return Boolean(selected && selected.bwaiId === section.bwaiId && this.sectionCaptureContentRevision() === revision);
+  }
+
+  private captureFromPreparedState(
+    prepared: BwaiPreparedSectionCapture,
+    section: SelectedSection,
+    revision: number
+  ): BwaiSectionCaptureResult | null {
+    if (
+      prepared.status !== 'ready' ||
+      !prepared.dataUrl ||
+      prepared.bwaiId !== section.bwaiId ||
+      prepared.revision !== revision
+    ) {
+      return null;
+    }
+
+    return {
+      dataUrl: prepared.dataUrl,
+      mimeType: prepared.mimeType ?? 'image/png',
+      width: Number(prepared.width ?? 0),
+      height: Number(prepared.height ?? 0)
+    };
+  }
+
+  private async waitForPreparedSectionCapture(
+    section: SelectedSection,
+    revision: number,
+    timeoutMs: number
+  ): Promise<BwaiSectionCaptureResult | null> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const prepared = this.preparedSectionCapture();
+      if (prepared.bwaiId !== section.bwaiId || prepared.revision !== revision) {
+        return null;
+      }
+
+      const readyCapture = this.captureFromPreparedState(prepared, section, revision);
+      if (readyCapture) {
+        return readyCapture;
+      }
+
+      if (prepared.status === 'failed') {
+        return null;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+
+    return null;
+  }
+
+  private async prepareSectionCapture(
+    section: SelectedSection,
+    revision: number,
+    trigger: string
+  ): Promise<void> {
+    if (!this.iframeReady || !section.bwaiId || !this.isSectionCaptureCurrent(section, revision)) {
+      return;
+    }
+
+    if (
+      this.sectionCapturePrepareInFlight &&
+      this.sectionCapturePrepareInFlight.bwaiId === section.bwaiId &&
+      this.sectionCapturePrepareInFlight.revision === revision
+    ) {
+      return;
+    }
+
+    this.sectionCapturePrepareInFlight = { bwaiId: section.bwaiId, revision };
+    this.preparedSectionCapture.set({
+      status: 'preparing',
+      bwaiId: section.bwaiId,
+      revision,
+      updatedAt: Date.now()
+    });
+
+    try {
+      const rawCapture = await this.requestSectionCapture(section);
+      const normalizedCapture = await this.normalizeCaptureForUpload(rawCapture);
+      if (!this.isSectionCaptureCurrent(section, revision)) {
+        return;
+      }
+
+      this.preparedSectionCapture.set({
+        status: 'ready',
+        bwaiId: section.bwaiId,
+        revision,
+        dataUrl: normalizedCapture.dataUrl,
+        mimeType: normalizedCapture.mimeType,
+        width: normalizedCapture.width,
+        height: normalizedCapture.height,
+        sizeBytes: this.estimateDataUrlSizeBytes(normalizedCapture.dataUrl),
+        updatedAt: Date.now()
+      });
+    } catch (error) {
+      const details = this.toSectionCaptureErrorDetails(error);
+      if (!this.isSectionCaptureCurrent(section, revision)) {
+        return;
+      }
+
+      console.warn('[BWAI] Section capture pre-prepare failed.', {
+        reason: details.reason,
+        message: details.message,
+        trigger,
+        bwaiId: section.bwaiId,
+        revision
+      });
+
+      this.preparedSectionCapture.set({
+        status: 'failed',
+        bwaiId: section.bwaiId,
+        revision,
+        reason: details.reason,
+        errorMessage: details.message,
+        updatedAt: Date.now()
+      });
+    } finally {
+      if (
+        this.sectionCapturePrepareInFlight &&
+        this.sectionCapturePrepareInFlight.bwaiId === section.bwaiId &&
+        this.sectionCapturePrepareInFlight.revision === revision
+      ) {
+        this.sectionCapturePrepareInFlight = null;
+      }
+    }
+  }
+
+  private async resolveSectionCaptureForSend(
+    section: SelectedSection
+  ): Promise<{ capture?: BwaiSectionCaptureResult; reason?: BwaiSectionCaptureFailureReason; message?: string }> {
+    const revision = this.sectionCaptureContentRevision();
+    const prepared = this.preparedSectionCapture();
+    const preparedCapture = this.captureFromPreparedState(prepared, section, revision);
+    if (preparedCapture) {
+      return { capture: preparedCapture };
+    }
+
+    const preparedMatches = prepared.bwaiId === section.bwaiId && prepared.revision === revision;
+    if (preparedMatches && this.iframeReady) {
+      if (prepared.status === 'idle' || prepared.status === 'failed') {
+        void this.prepareSectionCapture(section, revision, 'send-path');
+      }
+
+      if (prepared.status === 'idle' || prepared.status === 'preparing' || prepared.status === 'failed') {
+        const waitedCapture = await this.waitForPreparedSectionCapture(
+          section,
+          revision,
+          SECTION_CAPTURE_WAIT_ON_SEND_MS
+        );
+        if (waitedCapture) {
+          return { capture: waitedCapture };
+        }
+      }
+    }
+
+    try {
+      const fallbackCapture = await this.requestSectionCapture(section);
+      const normalizedFallbackCapture = await this.normalizeCaptureForUpload(fallbackCapture);
+      return { capture: normalizedFallbackCapture };
+    } catch (error) {
+      const details = this.toSectionCaptureErrorDetails(error);
+      return { reason: details.reason, message: details.message };
+    }
+  }
+
+  private async captureSelectedSectionAttachment(
+    section: SelectedSection
+  ): Promise<{ attachment?: BuildWithAiAttachment; warning?: string }> {
+    const resolved = await this.resolveSectionCaptureForSend(section);
+    if (!resolved.capture) {
+      const reason = resolved.reason ?? 'render-failed';
+      console.warn('[BWAI] Failed to capture section context image.', {
+        reason,
+        message: resolved.message ?? 'Section image capture failed before upload.'
+      });
+      return {
+        warning: this.buildSectionCaptureWarning(reason)
+      };
+    }
+
+    try {
+      const filename = this.buildSectionCaptureFileName(section, resolved.capture.mimeType);
+      const file = this.dataUrlToFile(resolved.capture.dataUrl, filename, resolved.capture.mimeType);
+      const url = await this.apiService.uploadImageAsync(file);
+
+      return {
+        attachment: {
+          id: this.createId('att'),
+          name: filename,
+          mimeType: file.type || resolved.capture.mimeType || 'image/png',
+          sizeBytes: file.size,
+          kind: 'url',
+          url
+        }
+      };
+    } catch (error) {
+      const details = this.toSectionCaptureErrorDetails(error);
+      console.warn('[BWAI] Failed to upload captured section context image.', {
+        reason: details.reason,
+        message: details.message
+      });
+      return {
+        warning: this.buildSectionCaptureWarning(details.reason)
+      };
+    }
+  }
+
+  private requestSectionCapture(section: SelectedSection): Promise<BwaiSectionCaptureResult> {
+    const win = this.previewIframe?.nativeElement.contentWindow;
+    if (!this.iframeReady || !win) {
+      return Promise.reject(
+        this.createSectionCaptureError('renderer-not-loaded', 'Preview is not ready for section capture.')
+      );
+    }
+
+    const requestId = this.createId('capture');
+
+    return new Promise<BwaiSectionCaptureResult>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingSectionCaptureRequests.delete(requestId);
+        reject(this.createSectionCaptureError('timeout', 'Section image capture timed out.'));
+      }, SECTION_CAPTURE_TIMEOUT_MS);
+
+      this.pendingSectionCaptureRequests.set(requestId, {
+        resolve,
+        reject,
+        timeoutId
+      });
+
+      try {
+        win.postMessage(
+          {
+            type: 'bwai-capture-section',
+            requestId,
+            selector: section.selector,
+            bwaiId: section.bwaiId,
+            paddingTop: SECTION_CAPTURE_PADDING_PX,
+            paddingBottom: SECTION_CAPTURE_PADDING_PX
+          },
+          '*'
+        );
+      } catch (error) {
+        clearTimeout(timeoutId);
+        this.pendingSectionCaptureRequests.delete(requestId);
+        const message = error instanceof Error ? error.message : 'Section image capture failed to start.';
+        reject(this.createSectionCaptureError('render-failed', message));
+      }
+    });
+  }
+
+  private rejectPendingSectionCaptureRequests(reason: string): void {
+    const normalizedReason = this.normalizeSectionCaptureReason(undefined, reason);
+    for (const [requestId, pending] of this.pendingSectionCaptureRequests.entries()) {
+      clearTimeout(pending.timeoutId);
+      pending.reject(this.createSectionCaptureError(normalizedReason, reason));
+      this.pendingSectionCaptureRequests.delete(requestId);
+    }
+  }
+
+  private async normalizeCaptureForUpload(capture: BwaiSectionCaptureResult): Promise<BwaiSectionCaptureResult> {
+    let sourceWidth = Math.max(0, Math.round(Number(capture.width ?? 0)));
+    let sourceHeight = Math.max(0, Math.round(Number(capture.height ?? 0)));
+    let sourceImage: HTMLImageElement | null = null;
+
+    if (sourceWidth <= 0 || sourceHeight <= 0 || sourceWidth > SECTION_CAPTURE_MAX_UPLOAD_WIDTH_PX) {
+      sourceImage = await this.loadImageFromDataUrl(capture.dataUrl);
+      if (sourceWidth <= 0) sourceWidth = sourceImage.naturalWidth;
+      if (sourceHeight <= 0) sourceHeight = sourceImage.naturalHeight;
+    }
+
+    if (sourceWidth <= SECTION_CAPTURE_MAX_UPLOAD_WIDTH_PX) {
+      return {
+        dataUrl: capture.dataUrl,
+        mimeType: capture.mimeType || 'image/png',
+        width: sourceWidth,
+        height: sourceHeight
+      };
+    }
+
+    const image = sourceImage ?? (await this.loadImageFromDataUrl(capture.dataUrl));
+    const scale = SECTION_CAPTURE_MAX_UPLOAD_WIDTH_PX / sourceWidth;
+    const outputWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const outputHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+    const context = canvas.getContext('2d');
+    if (!context) {
+      throw this.createSectionCaptureError('render-failed', 'Section image downscale context is unavailable.');
+    }
+
+    context.drawImage(image, 0, 0, outputWidth, outputHeight);
+
+    // Deterministic codec rule: use JPEG for very large captures after downscale, otherwise keep PNG.
+    const sourceArea = sourceWidth * sourceHeight;
+    const outputMimeType =
+      sourceArea > SECTION_CAPTURE_JPEG_AREA_THRESHOLD ? 'image/jpeg' : 'image/png';
+
+    let outputDataUrl = '';
+    try {
+      outputDataUrl =
+        outputMimeType === 'image/jpeg'
+          ? canvas.toDataURL(outputMimeType, 0.88)
+          : canvas.toDataURL(outputMimeType);
+    } catch (error) {
+      const reason =
+        error instanceof DOMException && error.name === 'SecurityError'
+          ? 'tainted-canvas'
+          : 'render-failed';
+      throw this.createSectionCaptureError(reason, 'Section image downscale failed.');
+    }
+
+    return {
+      dataUrl: outputDataUrl,
+      mimeType: outputMimeType,
+      width: outputWidth,
+      height: outputHeight
+    };
+  }
+
+  private loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => {
+        reject(this.createSectionCaptureError('render-failed', 'Section image payload could not be decoded.'));
+      };
+      image.src = dataUrl;
+    });
+  }
+
+  private estimateDataUrlSizeBytes(dataUrl: string): number {
+    const commaIndex = dataUrl.indexOf(',');
+    if (commaIndex < 0) return 0;
+
+    const header = dataUrl.slice(0, commaIndex);
+    const body = dataUrl.slice(commaIndex + 1);
+    if (/;base64/i.test(header)) {
+      const padding = body.endsWith('==') ? 2 : body.endsWith('=') ? 1 : 0;
+      return Math.max(0, Math.floor((body.length * 3) / 4) - padding);
+    }
+
+    return new Blob([decodeURIComponent(body)]).size;
+  }
+
+  private normalizeSectionCaptureReason(
+    reason?: string,
+    message?: string
+  ): BwaiSectionCaptureFailureReason {
+    const normalized = String(reason || '').trim().toLowerCase();
+    if (
+      normalized === 'timeout' ||
+      normalized === 'renderer-not-loaded' ||
+      normalized === 'section-not-found' ||
+      normalized === 'tainted-canvas' ||
+      normalized === 'render-failed'
+    ) {
+      return normalized;
+    }
+
+    const haystack = `${normalized} ${String(message || '').toLowerCase()}`;
+    if (haystack.includes('timeout')) return 'timeout';
+    if (
+      haystack.includes('renderer') ||
+      haystack.includes('html2canvas') ||
+      haystack.includes('not loaded')
+    ) {
+      return 'renderer-not-loaded';
+    }
+    if (haystack.includes('section') && haystack.includes('not found')) return 'section-not-found';
+    if (haystack.includes('not found')) return 'section-not-found';
+    if (
+      haystack.includes('tainted') ||
+      haystack.includes('cross-origin') ||
+      haystack.includes('securityerror')
+    ) {
+      return 'tainted-canvas';
+    }
+    return 'render-failed';
+  }
+
+  private createSectionCaptureError(
+    reason: BwaiSectionCaptureFailureReason,
+    message: string
+  ): Error & { reason: BwaiSectionCaptureFailureReason } {
+    const error = new Error(message) as Error & { reason: BwaiSectionCaptureFailureReason };
+    error.name = 'BwaiSectionCaptureError';
+    error.reason = reason;
+    return error;
+  }
+
+  private toSectionCaptureErrorDetails(error: unknown): {
+    reason: BwaiSectionCaptureFailureReason;
+    message: string;
+  } {
+    if (error && typeof error === 'object') {
+      const payload = error as { reason?: unknown; message?: unknown };
+      const message =
+        typeof payload.message === 'string' && payload.message.trim().length
+          ? payload.message
+          : 'Section image capture failed.';
+      const reason = this.normalizeSectionCaptureReason(
+        typeof payload.reason === 'string' ? payload.reason : undefined,
+        message
+      );
+      return { reason, message };
+    }
+
+    const fallbackMessage = typeof error === 'string' && error.trim() ? error : 'Section image capture failed.';
+    return {
+      reason: this.normalizeSectionCaptureReason(undefined, fallbackMessage),
+      message: fallbackMessage
+    };
+  }
+
+  private buildSectionCaptureWarning(_reason: BwaiSectionCaptureFailureReason): string {
+    return 'Section image context could not be captured. Sent without image.';
+  }
+
+  private buildSectionCaptureFileName(section: SelectedSection, mimeType = 'image/png'): string {
+    const labelToken = section.label
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32);
+    const fallback = `section-${section.sectionIndex + 1}`;
+    const extension = mimeType === 'image/jpeg' ? 'jpg' : 'png';
+    return `${labelToken || fallback}-context.${extension}`;
+  }
+
+  private dataUrlToFile(dataUrl: string, fileName: string, fallbackMimeType = 'image/png'): File {
+    const match = /^data:([^;,]+)?(?:;charset=[^;,]+)?;base64,(.+)$/i.exec(dataUrl.trim());
+    if (!match || !match[2]) {
+      throw this.createSectionCaptureError('render-failed', 'Invalid captured image payload.');
+    }
+
+    const mimeType = match[1] || fallbackMimeType;
+    const binary = atob(match[2]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    return new File([bytes], fileName, { type: mimeType });
   }
 
 
@@ -1534,6 +2749,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       })();
     </script>
 
+    <script src="/assets/vendor/html2canvas.min.js"></script>
     <script>
       /* ---- section toolbar ---- */
       (function () {
@@ -1542,6 +2758,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         var toolbarSection = null;
         var toolbarOrigPos = '';
         var insertMenu = null;
+        var styleEditorState = null;
+        var lastStyleTarget = null;
 
         var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form','Products List (Request)','Products List (Preset)'];
 
@@ -1553,6 +2771,23 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           clone.className = (clone.className || '').replace(/\\bbwai-\\S*/g, '').trim();
           if (clone.className === '') clone.removeAttribute('class');
           return clone.outerHTML;
+        }
+
+        function getCleanHtmlForSave() {
+          var root = document.getElementById('EditableContentRoot');
+          if (!root) return '';
+          var clone = root.cloneNode(true);
+          var ces = clone.querySelectorAll('[contenteditable]');
+          for (var i = 0; i < ces.length; i++) ces[i].removeAttribute('contenteditable');
+          var bound = clone.querySelectorAll('[data-bwai-edit-bound]');
+          for (var bi = 0; bi < bound.length; bi++) bound[bi].removeAttribute('data-bwai-edit-bound');
+          var styleTargets = clone.querySelectorAll('.bwai-style-target');
+          for (var si = 0; si < styleTargets.length; si++) styleTargets[si].classList.remove('bwai-style-target');
+          var styleIds = clone.querySelectorAll('[data-bwai-style-id]');
+          for (var di = 0; di < styleIds.length; di++) styleIds[di].removeAttribute('data-bwai-style-id');
+          var extras = clone.querySelectorAll('.bwai-toolbar');
+          for (var j = 0; j < extras.length; j++) extras[j].remove();
+          return clone.innerHTML;
         }
 
         function getSection(target) {
@@ -1595,6 +2830,128 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var children = root.children || [];
           for (var i = 0; i < children.length; i++) {
             ensureSectionId(children[i]);
+          }
+        }
+
+        function randomStyleId() {
+          return 'bwai-style-' + Math.random().toString(36).slice(2, 10);
+        }
+
+        function ensureStyleTargetId(el) {
+          if (!el || !(el instanceof Element)) return '';
+          var current = (el.getAttribute('data-bwai-style-id') || '').trim();
+          if (current) return current;
+          var next = '';
+          do {
+            next = randomStyleId();
+          } while (document.querySelector('[data-bwai-style-id="' + next + '"]'));
+          el.setAttribute('data-bwai-style-id', next);
+          return next;
+        }
+
+        function readUniformPx(computed, prefix) {
+          var top = parseFloat(computed[prefix + 'Top']);
+          var right = parseFloat(computed[prefix + 'Right']);
+          var bottom = parseFloat(computed[prefix + 'Bottom']);
+          var left = parseFloat(computed[prefix + 'Left']);
+          if ([top, right, bottom, left].some(function(v) { return !isFinite(v); })) return null;
+          if (Math.abs(top - right) > 0.1 || Math.abs(top - bottom) > 0.1 || Math.abs(top - left) > 0.1) return null;
+          return Math.round(top * 100) / 100;
+        }
+
+        function getStyleSnapshot(el) {
+          if (!el) return {};
+          var computed = window.getComputedStyle(el);
+          return {
+            textColor: computed.color || '',
+            backgroundColor: computed.backgroundColor || '',
+            fontSizePx: parseFloat(computed.fontSize) || null,
+            fontWeight: computed.fontWeight || '',
+            display: computed.display || '',
+            textAlign: computed.textAlign || '',
+            justifyContent: computed.justifyContent || '',
+            alignItems: computed.alignItems || '',
+            paddingPx: readUniformPx(computed, 'padding'),
+            marginPx: readUniformPx(computed, 'margin'),
+            borderRadiusPx: parseFloat(computed.borderTopLeftRadius) || null
+          };
+        }
+
+        function resolveStyleTarget() {
+          if (!toolbarSection) return null;
+          var selectionTarget = getSelectionStyleTarget();
+          if (selectionTarget && toolbarSection.contains(selectionTarget)) {
+            return selectionTarget;
+          }
+          if (lastStyleTarget && document.contains(lastStyleTarget) && toolbarSection.contains(lastStyleTarget)) {
+            return lastStyleTarget;
+          }
+          var active = document.activeElement;
+          var activeTarget = getClosestStyleTarget(active);
+          if (activeTarget && activeTarget !== toolbarSection) {
+            return activeTarget;
+          }
+          return toolbarSection;
+        }
+
+        function getElementFromNode(node) {
+          if (!node) return null;
+          if (node instanceof Element) return node;
+          if (node.nodeType === Node.TEXT_NODE) return node.parentElement;
+          return null;
+        }
+
+        function isEditorUiElement(el) {
+          return !!(el && el.closest && el.closest('.bwai-toolbar,.bwai-insert-popup'));
+        }
+
+        function canUseStyleTarget(el) {
+          if (!el || !(el instanceof Element)) return false;
+          if (!toolbarSection || !toolbarSection.contains(el)) return false;
+          if (isEditorUiElement(el)) return false;
+
+          var tag = (el.tagName || '').toLowerCase();
+          if (!tag) return false;
+          if (tag === 'script' || tag === 'style' || tag === 'meta' || tag === 'link' || tag === 'head' || tag === 'html' || tag === 'body') {
+            return false;
+          }
+
+          return true;
+        }
+
+        function getClosestStyleTarget(node) {
+          var el = getElementFromNode(node);
+          if (!el) return null;
+
+          if (canUseStyleTarget(el)) {
+            return el;
+          }
+
+          var cursor = el.parentElement;
+          while (cursor && cursor !== toolbarSection) {
+            if (canUseStyleTarget(cursor)) {
+              return cursor;
+            }
+            cursor = cursor.parentElement;
+          }
+
+          return canUseStyleTarget(toolbarSection) ? toolbarSection : null;
+        }
+
+        function getSelectionStyleTarget() {
+          if (typeof window.getSelection !== 'function') return null;
+          var selection = window.getSelection();
+          if (!selection || selection.rangeCount === 0) return null;
+          var anchor = selection.anchorNode || selection.focusNode;
+          if (!anchor) return null;
+          return getClosestStyleTarget(anchor);
+        }
+
+        function rememberStyleTarget(node) {
+          var target = getClosestStyleTarget(node);
+          if (!target) return;
+          if (toolbarSection && toolbarSection.contains(target)) {
+            lastStyleTarget = target;
           }
         }
 
@@ -1743,6 +3100,382 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           };
         }
 
+        function setStyleValue(style, prop, value, transform) {
+          if (value === null || value === undefined || value === '') {
+            style.removeProperty(prop);
+            return;
+          }
+
+          var nextValue = transform ? transform(value) : value;
+          if (nextValue === null || nextValue === undefined || nextValue === '') {
+            style.removeProperty(prop);
+            return;
+          }
+          style.setProperty(prop, String(nextValue));
+        }
+
+        function hasOwn(obj, key) {
+          return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+        }
+
+        function getStyleTargetKind(el) {
+          if (!el || !el.tagName) return 'generic';
+          var tag = el.tagName.toLowerCase();
+          if (tag === 'a') return 'link';
+          if (tag === 'img') return 'image';
+          return 'generic';
+        }
+
+        function getLinkSnapshot(el) {
+          if (!el || !el.tagName || el.tagName.toLowerCase() !== 'a') return null;
+          return {
+            href: el.getAttribute('href') || '',
+            target: el.getAttribute('target') || '',
+            rel: el.getAttribute('rel') || '',
+            openInNewTab: (el.getAttribute('target') || '') === '_blank'
+          };
+        }
+
+        function getImageSnapshot(el) {
+          if (!el || !el.tagName || el.tagName.toLowerCase() !== 'img') return null;
+          return {
+            src: el.getAttribute('src') || '',
+            alt: el.getAttribute('alt') || ''
+          };
+        }
+
+        function clearStyleTargetIndicator() {
+          var nodes = document.querySelectorAll('.bwai-style-target');
+          for (var i = 0; i < nodes.length; i++) nodes[i].classList.remove('bwai-style-target');
+        }
+
+        function markStyleTarget(el) {
+          clearStyleTargetIndicator();
+          if (el && el.classList) {
+            el.classList.add('bwai-style-target');
+          }
+        }
+
+        function createStyleEditorState(styleId, target) {
+          var tag = target && target.tagName ? target.tagName.toLowerCase() : '';
+          return {
+            styleId: styleId,
+            tag: tag,
+            originalStyle: target ? target.getAttribute('style') : null,
+            originalHref: tag === 'a' ? target.getAttribute('href') : null,
+            originalTarget: tag === 'a' ? target.getAttribute('target') : null,
+            originalRel: tag === 'a' ? target.getAttribute('rel') : null,
+            originalSrc: tag === 'img' ? target.getAttribute('src') : null,
+            originalAlt: tag === 'img' ? target.getAttribute('alt') : null
+          };
+        }
+
+        function restoreStyleEditorState(target, state) {
+          if (!target || !state) return;
+
+          if (state.originalStyle !== null && state.originalStyle !== undefined) {
+            target.setAttribute('style', state.originalStyle);
+          } else {
+            target.removeAttribute('style');
+          }
+
+          var tag = target.tagName ? target.tagName.toLowerCase() : '';
+          if (tag === 'a') {
+            if (state.originalHref !== null && state.originalHref !== undefined) target.setAttribute('href', state.originalHref);
+            else target.removeAttribute('href');
+            if (state.originalTarget !== null && state.originalTarget !== undefined) target.setAttribute('target', state.originalTarget);
+            else target.removeAttribute('target');
+            if (state.originalRel !== null && state.originalRel !== undefined) target.setAttribute('rel', state.originalRel);
+            else target.removeAttribute('rel');
+          }
+
+          if (tag === 'img') {
+            if (state.originalSrc !== null && state.originalSrc !== undefined) target.setAttribute('src', state.originalSrc);
+            else target.removeAttribute('src');
+            if (state.originalAlt !== null && state.originalAlt !== undefined) target.setAttribute('alt', state.originalAlt);
+            else target.removeAttribute('alt');
+          }
+        }
+
+        function applyStylePatch(el, styles) {
+          if (!el || !styles || typeof styles !== 'object') return;
+          var style = el.style;
+          var hasDisplay = hasOwn(styles, 'display');
+          var display = hasDisplay ? String(styles.display || '').trim() : '';
+          var isLayoutDisplay = display === 'flex' || display === 'grid' || display === 'inline-flex' || display === 'inline-grid';
+          var toPx = function(value) {
+            var numeric = Number(value);
+            if (!isFinite(numeric)) return null;
+            return numeric + 'px';
+          };
+
+          if (hasOwn(styles, 'textColor')) setStyleValue(style, 'color', styles.textColor);
+          if (hasOwn(styles, 'backgroundColor')) setStyleValue(style, 'background-color', styles.backgroundColor);
+          if (hasOwn(styles, 'fontWeight')) setStyleValue(style, 'font-weight', styles.fontWeight);
+          if (hasDisplay) setStyleValue(style, 'display', display);
+          if (hasOwn(styles, 'textAlign')) setStyleValue(style, 'text-align', styles.textAlign);
+          if (hasOwn(styles, 'paddingPx')) setStyleValue(style, 'padding', styles.paddingPx, toPx);
+          if (hasOwn(styles, 'marginPx')) setStyleValue(style, 'margin', styles.marginPx, toPx);
+          if (hasOwn(styles, 'borderRadiusPx')) setStyleValue(style, 'border-radius', styles.borderRadiusPx, toPx);
+          if (hasOwn(styles, 'fontSizePx')) setStyleValue(style, 'font-size', styles.fontSizePx, toPx);
+
+          if (hasOwn(styles, 'justifyContent')) setStyleValue(style, 'justify-content', styles.justifyContent);
+          if (hasOwn(styles, 'alignItems')) setStyleValue(style, 'align-items', styles.alignItems);
+          if (hasDisplay && !isLayoutDisplay) {
+            style.removeProperty('justify-content');
+            style.removeProperty('align-items');
+          }
+        }
+
+        function applyLinkPatch(el, linkPatch) {
+          if (!el || !linkPatch || typeof linkPatch !== 'object') return;
+          if (!el.tagName || el.tagName.toLowerCase() !== 'a') return;
+
+          if (hasOwn(linkPatch, 'href')) {
+            var href = String(linkPatch.href || '').trim();
+            if (href) el.setAttribute('href', href);
+            else el.removeAttribute('href');
+          }
+
+          if (hasOwn(linkPatch, 'openInNewTab')) {
+            if (Boolean(linkPatch.openInNewTab)) {
+              el.setAttribute('target', '_blank');
+              el.setAttribute('rel', 'noopener noreferrer');
+            } else {
+              el.removeAttribute('target');
+              el.removeAttribute('rel');
+            }
+          }
+        }
+
+        function applyImagePatch(el, imagePatch) {
+          if (!el || !imagePatch || typeof imagePatch !== 'object') return;
+          if (!el.tagName || el.tagName.toLowerCase() !== 'img') return;
+
+          if (hasOwn(imagePatch, 'src')) {
+            var src = String(imagePatch.src || '').trim();
+            if (src) el.setAttribute('src', src);
+            else el.removeAttribute('src');
+          }
+
+          if (hasOwn(imagePatch, 'alt')) {
+            el.setAttribute('alt', String(imagePatch.alt || ''));
+          }
+        }
+
+        function applyStyleEditorPatch(target, state, payload) {
+          restoreStyleEditorState(target, state);
+          if (!payload || typeof payload !== 'object') return;
+          applyStylePatch(target, payload.styles || {});
+          applyLinkPatch(target, payload.link || {});
+          applyImagePatch(target, payload.image || {});
+        }
+
+        function openStyleEditorForTarget(rawTarget) {
+          var source = getElementFromNode(rawTarget);
+          if (!source) return;
+          var section = getSection(source);
+          if (!section) return;
+          toolbarSection = section;
+          var target = getClosestStyleTarget(source) || section;
+          rememberStyleTarget(target);
+
+          var sectionMeta = getSectionMeta(section);
+          var styleId = ensureStyleTargetId(target);
+          if (!styleEditorState || styleEditorState.styleId !== styleId) {
+            styleEditorState = createStyleEditorState(styleId, target);
+          }
+          markStyleTarget(target);
+          var targetKind = getStyleTargetKind(target);
+
+          parent.postMessage({
+            type: 'bwai-selected',
+            selector: sectionMeta.selector,
+            reference: sectionMeta.reference,
+            bwaiId: sectionMeta.bwaiId,
+            label: sectionMeta.label,
+            sectionIndex: sectionMeta.idx,
+            totalSections: sectionMeta.total,
+            outerHtml: getCleanOuterHtml(section)
+          }, '*');
+
+          parent.postMessage({
+            type: 'bwai-style-editor-open',
+            styleId: styleId,
+            kind: targetKind,
+            tag: target.tagName.toLowerCase(),
+            label: target === section ? sectionMeta.label : sectionMeta.label + ' / ' + target.tagName.toLowerCase(),
+            sectionLabel: sectionMeta.label,
+            reference: sectionMeta.reference,
+            styles: getStyleSnapshot(target),
+            link: targetKind === 'link' ? getLinkSnapshot(target) : null,
+            image: targetKind === 'image' ? getImageSnapshot(target) : null
+          }, '*');
+        }
+
+        function createCaptureError(reason, message) {
+          var err = new Error(message || 'Section capture failed.');
+          err.bwaiReason = reason || 'render-failed';
+          return err;
+        }
+
+        function normalizeCaptureReason(reason, message) {
+          var normalized = String(reason || '').trim().toLowerCase();
+          if (
+            normalized === 'timeout' ||
+            normalized === 'renderer-not-loaded' ||
+            normalized === 'section-not-found' ||
+            normalized === 'tainted-canvas' ||
+            normalized === 'render-failed'
+          ) {
+            return normalized;
+          }
+
+          var haystack = (normalized + ' ' + String(message || '').toLowerCase()).trim();
+          if (haystack.indexOf('timeout') !== -1) return 'timeout';
+          if (
+            haystack.indexOf('renderer') !== -1 ||
+            haystack.indexOf('html2canvas') !== -1 ||
+            haystack.indexOf('not loaded') !== -1
+          ) {
+            return 'renderer-not-loaded';
+          }
+          if (haystack.indexOf('section') !== -1 && haystack.indexOf('not found') !== -1) return 'section-not-found';
+          if (haystack.indexOf('not found') !== -1) return 'section-not-found';
+          if (
+            haystack.indexOf('tainted') !== -1 ||
+            haystack.indexOf('cross-origin') !== -1 ||
+            haystack.indexOf('securityerror') !== -1
+          ) {
+            return 'tainted-canvas';
+          }
+          return 'render-failed';
+        }
+
+        function postCaptureFailure(requestId, reason, message) {
+          var text = message || 'Section capture failed.';
+          parent.postMessage(
+            {
+              type: 'bwai-capture-result',
+              requestId: requestId,
+              success: false,
+              reason: normalizeCaptureReason(reason, text),
+              error: text
+            },
+            '*'
+          );
+        }
+
+        async function captureSectionContext(request) {
+          var requestId = request && request.requestId ? String(request.requestId) : '';
+          if (!requestId) return;
+
+          try {
+            var target = null;
+            if (request.bwaiId) target = document.getElementById(String(request.bwaiId));
+            if (!target && request.selector) target = document.querySelector(String(request.selector));
+            if (!target) throw createCaptureError('section-not-found', 'Selected section was not found.');
+
+            if (typeof window.html2canvas !== 'function') {
+              throw createCaptureError('renderer-not-loaded', 'Capture renderer is not loaded yet.');
+            }
+
+            var rect = target.getBoundingClientRect();
+            var scrollX = window.scrollX || window.pageXOffset || 0;
+            var scrollY = window.scrollY || window.pageYOffset || 0;
+            var sectionLeft = rect.left + scrollX;
+            var sectionRight = rect.right + scrollX;
+            var sectionTop = rect.top + scrollY;
+            var sectionBottom = rect.bottom + scrollY;
+
+            var docEl = document.documentElement;
+            var body = document.body;
+            var docWidth = Math.max(
+              docEl.scrollWidth,
+              docEl.clientWidth,
+              body ? body.scrollWidth : 0,
+              body ? body.clientWidth : 0,
+              1
+            );
+            var docHeight = Math.max(
+              docEl.scrollHeight,
+              docEl.clientHeight,
+              body ? body.scrollHeight : 0,
+              body ? body.clientHeight : 0,
+              1
+            );
+
+            var root = document.getElementById('EditableContentRoot');
+            var rootRect = root ? root.getBoundingClientRect() : null;
+            var rootLeft = rootRect ? rootRect.left + scrollX : sectionLeft;
+            var rootRight = rootRect ? rootRect.right + scrollX : sectionRight;
+
+            var cropLeft = Math.floor(Math.max(0, Math.max(sectionLeft, rootLeft)));
+            var cropRight = Math.ceil(Math.min(docWidth, Math.min(sectionRight, rootRight)));
+            if (cropRight <= cropLeft) {
+              cropLeft = Math.floor(Math.max(0, sectionLeft));
+              cropRight = Math.ceil(Math.min(docWidth, sectionRight));
+            }
+            if (cropRight <= cropLeft) {
+              cropRight = Math.min(docWidth, cropLeft + Math.max(1, Math.ceil(rect.width)));
+            }
+            var cropWidth = Math.max(1, cropRight - cropLeft);
+
+            var padTop = Math.max(0, Math.floor(Number(request.paddingTop) || 0));
+            var padBottom = Math.max(0, Math.floor(Number(request.paddingBottom) || 0));
+            var cropTop = Math.max(0, Math.floor(sectionTop - padTop));
+            var cropBottom = Math.min(docHeight, Math.ceil(sectionBottom + padBottom));
+            if (cropBottom <= cropTop) {
+              cropBottom = Math.min(docHeight, cropTop + Math.max(1, Math.ceil(rect.height)));
+            }
+            var cropHeight = Math.max(1, cropBottom - cropTop);
+
+            document.documentElement.classList.add('bwai-capturing');
+            try {
+              var canvas = await window.html2canvas(document.body, {
+                backgroundColor: '#ffffff',
+                useCORS: true,
+                logging: false,
+                x: cropLeft,
+                y: cropTop,
+                width: cropWidth,
+                height: cropHeight,
+                scrollX: 0,
+                scrollY: 0,
+                windowWidth: docWidth,
+                windowHeight: docHeight
+              });
+
+              var dataUrl = '';
+              try {
+                dataUrl = canvas.toDataURL('image/png');
+              } catch (canvasError) {
+                throw createCaptureError('tainted-canvas', canvasError && canvasError.message ? canvasError.message : 'Canvas export failed.');
+              }
+
+              parent.postMessage(
+                {
+                  type: 'bwai-capture-result',
+                  requestId: requestId,
+                  success: true,
+                  dataUrl: dataUrl,
+                  mimeType: 'image/png',
+                  width: canvas.width,
+                  height: canvas.height
+                },
+                '*'
+              );
+            } finally {
+              document.documentElement.classList.remove('bwai-capturing');
+            }
+          } catch (error) {
+            document.documentElement.classList.remove('bwai-capturing');
+            var message = error && error.message ? error.message : String(error || 'Section capture failed.');
+            var reason = normalizeCaptureReason(error && error.bwaiReason ? error.bwaiReason : '', message);
+            postCaptureFailure(requestId, reason, message);
+          }
+        }
+
         /* ── insert popup ── */
         function hideInsertPopup() {
           if (insertMenu) { insertMenu.remove(); insertMenu = null; }
@@ -1790,6 +3523,34 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           if (insertMenu && !insertMenu.contains(e.target)) hideInsertPopup();
         }, true);
 
+        document.addEventListener('pointerdown', function(event) {
+          if (isEditorUiElement(event.target)) return;
+          var sec = getSection(event.target);
+          if (!sec || !toolbarSection || sec !== toolbarSection) return;
+          rememberStyleTarget(event.target);
+        }, true);
+
+        document.addEventListener('focusin', function(event) {
+          if (isEditorUiElement(event.target)) return;
+          rememberStyleTarget(event.target);
+          var focusTarget = event.target;
+          if (focusTarget && focusTarget.tagName && focusTarget.tagName.toLowerCase() === 'a') {
+            openStyleEditorForTarget(focusTarget);
+          }
+        }, true);
+
+        document.addEventListener('click', function(event) {
+          if (isEditorUiElement(event.target)) return;
+          var clickTarget = event.target;
+          var img = clickTarget && clickTarget.closest ? clickTarget.closest('img') : null;
+          if (!img) return;
+          var sec = getSection(img);
+          if (!sec) return;
+          event.preventDefault();
+          event.stopPropagation();
+          openStyleEditorForTarget(img);
+        }, true);
+
         /* ── toolbar ── */
         function removeToolbar() {
           if (toolbar && toolbar.parentElement) {
@@ -1813,6 +3574,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         var IC_SELECT = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-7 1-4 7z"/></svg>';
         var IC_COPY   = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
         var IC_CHECK  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        var IC_STYLE  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 9-5 5-9-9z"/><path d="M8 7l9 9"/><path d="M4 20h7"/></svg>';
 
         function buildToolbar(el, idx, total) {
           removeToolbar();
@@ -1821,6 +3583,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var computed = window.getComputedStyle(el).position;
           if (computed === 'static') el.style.position = 'relative';
           toolbarSection = el;
+          if (!lastStyleTarget || !toolbarSection.contains(lastStyleTarget)) {
+            lastStyleTarget = null;
+          }
 
           var t = document.createElement('div');
           t.className = 'bwai-toolbar';
@@ -1869,6 +3634,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           g5.appendChild(btn('copy-id', IC_COPY,   'Copy ID', false));
           t.appendChild(g5);
 
+          // Group 6: Style editor
+          var g6 = grp();
+          g6.appendChild(btn('style', IC_STYLE, 'Style', false));
+          t.appendChild(g6);
+
           t.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('[data-bwai]') : null;
             if (!b || b.disabled) return;
@@ -1888,6 +3658,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
             // Insert is handled locally — show popup in iframe
             if (action === 'insert') {
               showInsertPopup(b);
+              return;
+            }
+
+            if (action === 'style') {
+              openStyleEditorForTarget(resolveStyleTarget());
               return;
             }
 
@@ -1914,6 +3689,42 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         window.addEventListener('message', function (event) {
           var d = event.data;
           if (!d || typeof d !== 'object') return;
+
+          if (d.type === 'bwai-style-preview' || d.type === 'bwai-style-commit' || d.type === 'bwai-style-revert') {
+            var styleId = d.styleId ? String(d.styleId) : '';
+            if (!styleId) return;
+            var styleTarget = document.querySelector('[data-bwai-style-id="' + styleId + '"]');
+            if (!styleTarget) {
+              parent.postMessage({
+                type: 'bwai-style-editor-invalidated',
+                message: 'Styled element is no longer available.'
+              }, '*');
+              styleEditorState = null;
+              clearStyleTargetIndicator();
+              return;
+            }
+
+            if (!styleEditorState || styleEditorState.styleId !== styleId) {
+              styleEditorState = createStyleEditorState(styleId, styleTarget);
+            }
+
+            if (d.type === 'bwai-style-revert') {
+              restoreStyleEditorState(styleTarget, styleEditorState);
+              styleEditorState = null;
+              clearStyleTargetIndicator();
+              return;
+            }
+
+            applyStyleEditorPatch(styleTarget, styleEditorState, d);
+            markStyleTarget(styleTarget);
+
+            if (d.type === 'bwai-style-commit') {
+              styleEditorState = null;
+              clearStyleTargetIndicator();
+              parent.postMessage({ type: 'bwai-inline-edit-save', html: getCleanHtmlForSave() }, '*');
+            }
+            return;
+          }
 
           if (d.type === 'bwai-highlight') {
             clearClass('bwai-selected');
@@ -1965,6 +3776,18 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
               ensureAllSectionIds();
             }
 
+            if (styleEditorState && styleEditorState.styleId) {
+              var stillExists = document.querySelector('[data-bwai-style-id="' + styleEditorState.styleId + '"]');
+              if (!stillExists) {
+                styleEditorState = null;
+                clearStyleTargetIndicator();
+                parent.postMessage({
+                  type: 'bwai-style-editor-invalidated',
+                  message: 'Styled element was replaced by the latest patch.'
+                }, '*');
+              }
+            }
+
             if (window.CIESectionInViewRuntime && typeof window.CIESectionInViewRuntime.hydrate === 'function') {
               window.CIESectionInViewRuntime.hydrate(document);
             }
@@ -2006,6 +3829,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
               if (dns) dns.disabled = (m2.idx === m2.total - 1);
             }
           }
+
+          if (d.type === 'bwai-capture-section') {
+            captureSectionContext(d);
+          }
         });
 
         /* ── hover ── */
@@ -2042,7 +3869,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           '.bwai-insert-popup button{display:block;width:100%;border:none;background:none;padding:6px 12px;text-align:left;font-size:12px;font-weight:500;cursor:pointer;border-radius:4px;color:#333;font-family:-apple-system,sans-serif}',
           '.bwai-insert-popup button:hover{background:#fff0f7;color:#ff3399}',
           '.bwai-insert-sep{height:1px;background:#f0f0f0;margin:4px 0}',
-          '.bwai-insert-custom{color:#888!important;font-style:italic}'
+          '.bwai-insert-custom{color:#888!important;font-style:italic}',
+          '.bwai-style-target{outline:2px solid #1d9bf0!important;outline-offset:1px;box-shadow:0 0 0 2px rgba(29,155,240,0.18)!important}',
+          '.bwai-capturing .bwai-hover,.bwai-capturing .bwai-selected{outline:none!important;background:transparent!important}',
+          '.bwai-capturing .bwai-style-target{outline:none!important;box-shadow:none!important}',
+          '.bwai-capturing .bwai-toolbar,.bwai-capturing .bwai-insert-popup{display:none!important}'
         ].join('');
         document.head.appendChild(style);
 
@@ -2062,7 +3893,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           for (var i = 0; i < ces.length; i++) ces[i].removeAttribute('contenteditable');
           var bound = clone.querySelectorAll('[data-bwai-edit-bound]');
           for (var i = 0; i < bound.length; i++) bound[i].removeAttribute('data-bwai-edit-bound');
-          var extras = clone.querySelectorAll('.bwai-inline-popup,.bwai-toolbar,.bwai-link-bar');
+          var styleTargets = clone.querySelectorAll('.bwai-style-target');
+          for (var si = 0; si < styleTargets.length; si++) styleTargets[si].classList.remove('bwai-style-target');
+          var styleIds = clone.querySelectorAll('[data-bwai-style-id]');
+          for (var di = 0; di < styleIds.length; di++) styleIds[di].removeAttribute('data-bwai-style-id');
+          var extras = clone.querySelectorAll('.bwai-toolbar');
           for (var j = 0; j < extras.length; j++) extras[j].remove();
           return clone.innerHTML;
         }
@@ -2071,154 +3906,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           parent.postMessage({ type: 'bwai-inline-edit-save', html: getCleanHtml() }, '*');
         }
 
-        function showPopup(fields, onConfirm) {
-          var existing = document.querySelector('.bwai-inline-popup');
-          if (existing) existing.remove();
-          var popup = document.createElement('div');
-          popup.className = 'bwai-inline-popup';
-          popup.style.cssText = 'position:fixed;z-index:999999;background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:260px';
-          var inputs = fields.map(function(f) {
-            var inp = document.createElement('input');
-            inp.type = 'text';
-            inp.placeholder = f.placeholder;
-            inp.value = f.value;
-            inp.style.cssText = 'border:1px solid #ddd;border-radius:4px;padding:5px 8px;font-size:12px;width:100%;box-sizing:border-box;outline:none';
-            inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') btn.click(); if (e.key === 'Escape') popup.remove(); });
-            popup.appendChild(inp);
-            return inp;
-          });
-          var btn = document.createElement('button');
-          btn.textContent = 'Save';
-          btn.style.cssText = 'padding:5px 12px;border:1px solid #ff3399;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer;background:#ff3399;color:#fff;align-self:flex-end';
-          btn.addEventListener('click', function() { onConfirm(inputs.map(function(i) { return i.value; })); popup.remove(); });
-          popup.appendChild(btn);
-          document.body.appendChild(popup);
-          setTimeout(function() {
-            inputs[0].focus(); inputs[0].select();
-            var vw = window.innerWidth, vh = window.innerHeight;
-            var pr = popup.getBoundingClientRect();
-            var left = Math.min(popup._anchorX || 20, vw - pr.width - 8);
-            var top = Math.min(popup._anchorY || 20, vh - pr.height - 8);
-            popup.style.left = Math.max(8, left) + 'px';
-            popup.style.top = Math.max(8, top) + 'px';
-          }, 0);
-          document.addEventListener('mousedown', function closePopup(e) {
-            if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('mousedown', closePopup); }
-          }, true);
-          return popup;
-        }
-
-        function showLinkEditBar(anchor) {
-          var existing = document.querySelector('.bwai-link-bar');
-          if (existing && existing._anchor === anchor) return;
-          if (existing) existing.remove();
-
-          var origHref = anchor.getAttribute('href') || '';
-          var origTarget = anchor.getAttribute('target') || '';
-          var origRel = anchor.getAttribute('rel') || '';
-
-          var bar = document.createElement('div');
-          bar.className = 'bwai-inline-popup bwai-link-bar';
-          bar._anchor = anchor;
-          bar.style.cssText = 'position:fixed;z-index:999999;background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(0,0,0,.18);min-width:300px';
-
-          var urlInput = document.createElement('input');
-          urlInput.type = 'text';
-          urlInput.placeholder = 'URL';
-          urlInput.value = origHref;
-          urlInput.style.cssText = 'border:1px solid #ddd;border-radius:4px;padding:4px 8px;font-size:12px;flex:1;outline:none;min-width:0';
-
-          var tabLabel = document.createElement('label');
-          tabLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:#666;flex-shrink:0;cursor:pointer;white-space:nowrap';
-          var tabCheck = document.createElement('input');
-          tabCheck.type = 'checkbox';
-          tabCheck.checked = origTarget === '_blank';
-          tabLabel.appendChild(tabCheck);
-          tabLabel.appendChild(document.createTextNode(' New tab'));
-
-          var saveBtn = document.createElement('button');
-          saveBtn.textContent = '✓';
-          saveBtn.title = 'Save';
-          saveBtn.style.cssText = 'width:24px;height:24px;border:1px solid #22c55e;border-radius:4px;background:#22c55e;color:#fff;font-size:13px;cursor:pointer;flex-shrink:0;padding:0;line-height:1';
-
-          var cancelBtn = document.createElement('button');
-          cancelBtn.textContent = '✕';
-          cancelBtn.title = 'Cancel';
-          cancelBtn.style.cssText = 'width:24px;height:24px;border:1px solid #111;border-radius:4px;background:#111;color:#fff;font-size:11px;cursor:pointer;flex-shrink:0;padding:0;line-height:1';
-
-          function applyAndClose() {
-            var href = urlInput.value.trim();
-            if (href) anchor.setAttribute('href', href); else anchor.removeAttribute('href');
-            if (tabCheck.checked) { anchor.setAttribute('target', '_blank'); anchor.setAttribute('rel', 'noopener noreferrer'); }
-            else { anchor.removeAttribute('target'); anchor.removeAttribute('rel'); }
-            save();
-            bar.remove();
-            document.removeEventListener('focusin', onFocusIn);
-          }
-
-          function cancelAndClose() {
-            if (origHref) anchor.setAttribute('href', origHref); else anchor.removeAttribute('href');
-            if (origTarget) anchor.setAttribute('target', origTarget); else anchor.removeAttribute('target');
-            if (origRel) anchor.setAttribute('rel', origRel); else anchor.removeAttribute('rel');
-            bar.remove();
-            document.removeEventListener('focusin', onFocusIn);
-          }
-
-          saveBtn.addEventListener('click', function(e) { e.stopPropagation(); applyAndClose(); });
-          cancelBtn.addEventListener('click', function(e) { e.stopPropagation(); cancelAndClose(); });
-          urlInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') { e.preventDefault(); applyAndClose(); }
-            if (e.key === 'Escape') cancelAndClose();
-          });
-          tabCheck.addEventListener('change', function() {
-            if (tabCheck.checked) { anchor.setAttribute('target', '_blank'); anchor.setAttribute('rel', 'noopener noreferrer'); }
-            else { anchor.removeAttribute('target'); anchor.removeAttribute('rel'); }
-          });
-
-          bar.appendChild(urlInput);
-          bar.appendChild(tabLabel);
-          bar.appendChild(saveBtn);
-          bar.appendChild(cancelBtn);
-          document.body.appendChild(bar);
-
-          setTimeout(function() {
-            var rect = anchor.getBoundingClientRect();
-            var vw = window.innerWidth, vh = window.innerHeight;
-            var br = bar.getBoundingClientRect();
-            var top = rect.bottom + 4;
-            if (top + br.height > vh - 8) top = rect.top - br.height - 4;
-            bar.style.left = Math.max(8, Math.min(rect.left, vw - br.width - 8)) + 'px';
-            bar.style.top = Math.max(8, top) + 'px';
-            urlInput.focus(); urlInput.select();
-          }, 0);
-
-          function onFocusIn(e) {
-            if (!bar.contains(e.target) && e.target !== anchor) {
-              applyAndClose();
-            }
-          }
-          document.addEventListener('focusin', onFocusIn);
-        }
-
-        function showImagePopup(img) {
-          var rect = img.getBoundingClientRect();
-          var popup = showPopup(
-            [
-              { placeholder: 'Image URL', value: img.getAttribute('src') || '' },
-              { placeholder: 'Alt text', value: img.getAttribute('alt') || '' }
-            ],
-            function(vals) { img.setAttribute('src', vals[0]); img.setAttribute('alt', vals[1]); save(); }
-          );
-          popup._anchorX = rect.left;
-          popup._anchorY = rect.bottom + 4;
-        }
-
         function enableEditing() {
           if (!root) return;
           var textEls = root.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,td,th,span,button');
           for (var i = 0; i < textEls.length; i++) {
             var el = textEls[i];
-            if (el.closest('.bwai-toolbar') || el.closest('.bwai-inline-popup')) continue;
+            if (el.closest('.bwai-toolbar')) continue;
             if (el.contentEditable === 'true') continue;
             el.contentEditable = 'true';
             el.addEventListener('blur', save);
@@ -2226,7 +3919,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           var links = root.querySelectorAll('a');
           for (var j = 0; j < links.length; j++) {
             var a = links[j];
-            if (a.closest('.bwai-toolbar') || a.closest('.bwai-inline-popup') || a.closest('.bwai-link-bar')) continue;
+            if (a.closest('.bwai-toolbar')) continue;
             if (a.dataset.bwaiEditBound) continue;
             a.dataset.bwaiEditBound = '1';
             a.contentEditable = 'true';
@@ -2241,17 +3934,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
                 e.stopPropagation();
                 el.focus({ preventScroll: true });
               });
-              el.addEventListener('focus', function() { showLinkEditBar(el); });
             })(a);
           }
           var imgs = root.querySelectorAll('img');
           for (var k = 0; k < imgs.length; k++) {
             var img = imgs[k];
-            if (img.closest('.bwai-toolbar') || img.closest('.bwai-inline-popup')) continue;
+            if (img.closest('.bwai-toolbar')) continue;
             if (img.dataset.bwaiEditBound) continue;
             img.dataset.bwaiEditBound = '1';
             img.style.cursor = 'pointer';
-            img.addEventListener('click', function(e) { e.stopPropagation(); showImagePopup(this); });
           }
         }
 

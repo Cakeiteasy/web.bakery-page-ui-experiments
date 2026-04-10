@@ -147,167 +147,336 @@
       <p class="status-banner status-banner--chat status-banner--warning" *ngIf="contextWarningText()">
         {{ contextWarningText() }}
       </p>
-
-      <!-- Chat / Versions tabs -->
-      <div class="chat-tabs">
-        <button
-          type="button"
-          class="chat-tab-btn"
-          [class.chat-tab-btn--active]="activeTab() === 'chat'"
-          (click)="onSwitchTab('chat')"
-        >Chat</button>
-        <button
-          type="button"
-          class="chat-tab-btn"
-          [class.chat-tab-btn--active]="activeTab() === 'versions'"
-          (click)="onSwitchTab('versions')"
-        >Versions</button>
-      </div>
-
-      <!-- Chat tab -->
-      <ng-container *ngIf="activeTab() === 'chat'">
-        <section class="messages" #messagesEl aria-label="Chat history">
-          <article
-            *ngFor="let message of messages(); trackBy: trackByMessage"
-            class="message"
-            [class.message--user]="message.role === 'user'"
-            [class.message--assistant]="message.role === 'assistant'"
-            [class.message--error]="message.errorCategory"
-          >
-            <p class="message__target" *ngIf="message.role === 'user' && message.target">
-              <span class="message__target-key">Target:</span>
-              <span class="message__target-value">{{ message.target.label }}</span>
-              <span class="message__target-ref" *ngIf="message.target.reference">{{ message.target.reference }}</span>
-            </p>
-            <p class="message__text">{{ message.text }}</p>
-
-            <ul class="message__attachments" *ngIf="message.attachments.length">
-              <li *ngFor="let attachment of message.attachments">
-                <span>{{ attachment.name }}</span>
-                <small *ngIf="attachment.sizeBytes > 0">{{ (attachment.sizeBytes / 1024) | number: '1.0-0' }} KB</small>
-              </li>
-            </ul>
-          </article>
-
-          <!-- Working indicator (inside messages so it scrolls with chat) -->
-          <article class="message message--assistant" *ngIf="processing()" aria-label="AI is thinking">
-            <p class="message__text working-text">Working…</p>
-          </article>
-        </section>
-
-        <form class="composer" (submit)="$event.preventDefault(); onSend()">
-
-          <!-- Section context chip -->
-          <div class="section-ctx" *ngIf="selectedSection() as sel">
-            <div class="section-ctx__row">
-              <div class="section-ctx__chip">
-                <span class="section-ctx__dot" aria-hidden="true"></span>
-                <span class="section-ctx__label">{{ sel.label }}</span>
-                <button
-                  type="button"
-                  class="section-ctx__deselect"
-                  title="Deselect section"
-                  aria-label="Deselect section"
-                  (click)="onDeselectSection()"
-                >✕</button>
-              </div>
+      <ng-container *ngIf="showStyleEditor(); else chatVersionsPane">
+        <section class="style-editor" aria-label="Element style editor" *ngIf="styleEditorTarget() as styleTarget">
+          <header class="style-editor__header">
+            <div class="style-editor__title-wrap">
+              <h3>Style Editor</h3>
+              <p>
+                {{ styleTarget.label }}
+                <span *ngIf="styleTarget.reference">({{ styleTarget.reference }})</span>
+              </p>
             </div>
-          </div>
+            <div class="style-editor__header-actions">
+              <button type="button" class="ghost-button ghost-button--small" (click)="onCancelStyleEditor()">Cancel</button>
+              <button type="button" class="send-button style-editor__save-btn" (click)="onSaveStyleEditor()">Save</button>
+            </div>
+          </header>
 
-          <div class="composer__pending" *ngIf="pendingAttachments().length">
-            <button
-              type="button"
-              class="pending-pill"
-              *ngFor="let attachment of pendingAttachments()"
-              (click)="removePendingAttachment(attachment.id)"
-            >
-              <span>{{ attachment.name }}</span>
-              <small>✕</small>
-            </button>
-          </div>
+          <div class="style-editor__body">
+            <div class="style-grid">
+              <label class="style-field style-field--color">
+                <span>Text color</span>
+                <input
+                  type="color"
+                  [ngModel]="styleDraft().textColor"
+                  (ngModelChange)="onStyleFieldChange('textColor', $event)" />
+              </label>
 
-          <div class="composer__field">
-            <textarea
-              #composerTextarea
-              rows="2"
-              [ngModel]="draftMessage()"
-              (ngModelChange)="onDraftChanged($event)"
-              (input)="onTextareaInput($event)"
-              (keydown)="onComposerKeydown($event)"
-              name="prompt"
-              placeholder="Describe the change you want…"
-            ></textarea>
-          </div>
+              <label class="style-field style-field--color">
+                <span>Background</span>
+                <input
+                  type="color"
+                  [ngModel]="styleDraft().backgroundColor"
+                  (ngModelChange)="onStyleFieldChange('backgroundColor', $event)" />
+              </label>
 
-          <div class="composer__actions">
-            <div class="composer__actions-left">
-              <button
-                type="button"
-                class="upload-button"
-                title="Select or upload images"
-                [class.upload-button--busy]="uploadingCount() > 0"
-                [disabled]="uploadingCount() > 0"
-                (click)="showImagePicker.set(true)"
-              >
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M2 12l3.5-4.5 2.5 3L11 7l3 5H2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
-                  <circle cx="5.5" cy="5.5" r="1.2" stroke="currentColor" stroke-width="1.3"/>
-                  <rect x="0.7" y="0.7" width="14.6" height="14.6" rx="2.3" stroke="currentColor" stroke-width="1.3"/>
-                </svg>
-                <span>{{ uploadingCount() > 0 ? 'Uploading…' : 'Image' }}</span>
-              </button>
+              <label class="style-field">
+                <span>Font size (px)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  [ngModel]="styleDraft().fontSizePx"
+                  (ngModelChange)="onStyleFieldChange('fontSizePx', $event)" />
+              </label>
 
-              <label class="model-select" [title]="selectedModel().label">
-                <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                  <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/>
-                  <path d="M7 4v3l2 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                </svg>
+              <label class="style-field">
+                <span>Font weight</span>
                 <select
-                  aria-label="Model selection"
-                  name="model"
-                  [ngModel]="selectedModel().key"
-                  (ngModelChange)="onModelChanged($event)"
-                >
-                  <option *ngFor="let model of modelOptions" [ngValue]="model.key">{{ model.label }}</option>
+                  [ngModel]="styleDraft().fontWeight"
+                  (ngModelChange)="onStyleFieldChange('fontWeight', $event)">
+                  <option *ngFor="let option of styleFontWeightOptions" [ngValue]="option.value">{{ option.label }}</option>
                 </select>
               </label>
+
+              <label class="style-field">
+                <span>Display</span>
+                <select
+                  [ngModel]="styleDraft().display"
+                  (ngModelChange)="onStyleFieldChange('display', $event)">
+                  <option *ngFor="let option of styleDisplayOptions" [ngValue]="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+
+              <label class="style-field">
+                <span>Text align</span>
+                <select
+                  [ngModel]="styleDraft().textAlign"
+                  (ngModelChange)="onStyleFieldChange('textAlign', $event)">
+                  <option *ngFor="let option of styleTextAlignOptions" [ngValue]="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+
+              <label class="style-field">
+                <span>Justify content</span>
+                <select
+                  [disabled]="!styleAlignmentControlsEnabled()"
+                  [ngModel]="styleDraft().justifyContent"
+                  (ngModelChange)="onStyleFieldChange('justifyContent', $event)">
+                  <option *ngFor="let option of styleJustifyOptions" [ngValue]="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+
+              <label class="style-field">
+                <span>Align items</span>
+                <select
+                  [disabled]="!styleAlignmentControlsEnabled()"
+                  [ngModel]="styleDraft().alignItems"
+                  (ngModelChange)="onStyleFieldChange('alignItems', $event)">
+                  <option *ngFor="let option of styleAlignItemsOptions" [ngValue]="option.value">{{ option.label }}</option>
+                </select>
+              </label>
+
+              <label class="style-field">
+                <span>Padding (px)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  [ngModel]="styleDraft().paddingPx"
+                  (ngModelChange)="onStyleFieldChange('paddingPx', $event)" />
+              </label>
+
+              <label class="style-field">
+                <span>Margin (px)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  [ngModel]="styleDraft().marginPx"
+                  (ngModelChange)="onStyleFieldChange('marginPx', $event)" />
+              </label>
+
+              <label class="style-field">
+                <span>Border radius (px)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  [ngModel]="styleDraft().borderRadiusPx"
+                  (ngModelChange)="onStyleFieldChange('borderRadiusPx', $event)" />
+              </label>
             </div>
-            <button type="submit" class="send-button" [disabled]="!canSend()">
-              Apply
-              <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                <path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
+
+            <p class="style-editor__hint" *ngIf="!styleAlignmentControlsEnabled()">
+              `justify-content` and `align-items` are available when display is `flex` or `grid`.
+            </p>
+
+            <section class="style-editor__entity style-editor__entity--link" *ngIf="styleTarget.kind === 'link' && styleLinkDraft() as linkDraft">
+              <h4>Link settings</h4>
+              <label class="style-field style-field--full">
+                <span>URL</span>
+                <input
+                  type="text"
+                  [ngModel]="linkDraft.href"
+                  (ngModelChange)="onStyleLinkFieldChange('href', $event)" />
+              </label>
+              <label class="style-field style-field--check">
+                <input
+                  type="checkbox"
+                  [ngModel]="linkDraft.openInNewTab"
+                  (ngModelChange)="onStyleLinkFieldChange('openInNewTab', $event)" />
+                <span>Open in new tab</span>
+              </label>
+            </section>
+
+            <section class="style-editor__entity style-editor__entity--image" *ngIf="styleTarget.kind === 'image' && styleImageDraft() as imageDraft">
+              <h4>Image settings</h4>
+              <label class="style-field style-field--full">
+                <span>Image URL</span>
+                <input
+                  type="text"
+                  [ngModel]="imageDraft.src"
+                  (ngModelChange)="onStyleImageFieldChange('src', $event)" />
+              </label>
+              <label class="style-field style-field--full">
+                <span>Alt text</span>
+                <input
+                  type="text"
+                  [ngModel]="imageDraft.alt"
+                  (ngModelChange)="onStyleImageFieldChange('alt', $event)" />
+              </label>
+            </section>
           </div>
-
-          <p class="composer__hint">Drop images or use the image button. They're sent as vision context.</p>
-        </form>
-      </ng-container>
-
-      <!-- Versions tab -->
-      <ng-container *ngIf="activeTab() === 'versions'">
-        <section class="versions-pane" aria-label="Version history">
-          <p class="versions-pane__empty" *ngIf="versions().length === 0">No versions yet. Apply a patch to create one.</p>
-          <article
-            class="version-entry"
-            *ngFor="let v of versions(); trackBy: trackByVersion"
-          >
-            <div class="version-entry__meta">
-              <span class="version-badge" [class.version-badge--ok]="v.status === 'applied'" [class.version-badge--err]="v.status === 'rejected'">
-                {{ v.status | uppercase }}
-              </span>
-              <span class="version-entry__time">{{ v.createdAt | date: 'MMM d, HH:mm' }}</span>
-              <span class="version-entry__label" *ngIf="v.label">{{ v.label }}</span>
-            </div>
-            <button
-              type="button"
-              class="version-entry__restore"
-              (click)="onRestoreVersion(v)"
-              *ngIf="v.status === 'applied'"
-            >Restore</button>
-          </article>
         </section>
       </ng-container>
+
+      <ng-template #chatVersionsPane>
+        <!-- Chat / Versions tabs -->
+        <div class="chat-tabs">
+          <button
+            type="button"
+            class="chat-tab-btn"
+            [class.chat-tab-btn--active]="activeTab() === 'chat'"
+            (click)="onSwitchTab('chat')"
+          >Chat</button>
+          <button
+            type="button"
+            class="chat-tab-btn"
+            [class.chat-tab-btn--active]="activeTab() === 'versions'"
+            (click)="onSwitchTab('versions')"
+          >Versions</button>
+        </div>
+
+        <!-- Chat tab -->
+        <ng-container *ngIf="activeTab() === 'chat'">
+          <section class="messages" #messagesEl aria-label="Chat history">
+            <article
+              *ngFor="let message of messages(); trackBy: trackByMessage"
+              class="message"
+              [class.message--user]="message.role === 'user'"
+              [class.message--assistant]="message.role === 'assistant'"
+              [class.message--error]="message.errorCategory"
+            >
+              <p class="message__target" *ngIf="message.role === 'user' && message.target">
+                <span class="message__target-key">Target:</span>
+                <span class="message__target-value">{{ message.target.label }}</span>
+                <span class="message__target-ref" *ngIf="message.target.reference">{{ message.target.reference }}</span>
+              </p>
+              <p class="message__text">{{ message.text }}</p>
+              <p class="message__capture-warning" *ngIf="message.role === 'user' && message.sectionCaptureWarning">
+                {{ message.sectionCaptureWarning }}
+              </p>
+
+              <ul class="message__attachments" *ngIf="message.attachments.length">
+                <li *ngFor="let attachment of message.attachments">
+                  <span>{{ attachment.name }}</span>
+                  <small *ngIf="attachment.sizeBytes > 0">{{ (attachment.sizeBytes / 1024) | number: '1.0-0' }} KB</small>
+                </li>
+              </ul>
+            </article>
+
+            <!-- Working indicator (inside messages so it scrolls with chat) -->
+            <article class="message message--assistant" *ngIf="processing()" aria-label="AI is thinking">
+              <p class="message__text working-text">Working…</p>
+            </article>
+          </section>
+
+          <form class="composer" (submit)="$event.preventDefault(); onSend()">
+
+            <!-- Section context chip -->
+            <div class="section-ctx" *ngIf="selectedSection() as sel">
+              <div class="section-ctx__row">
+                <div class="section-ctx__chip">
+                  <span class="section-ctx__dot" aria-hidden="true"></span>
+                  <span class="section-ctx__label">{{ sel.label }}</span>
+                  <button
+                    type="button"
+                    class="section-ctx__deselect"
+                    title="Deselect section"
+                    aria-label="Deselect section"
+                    (click)="onDeselectSection()"
+                  >✕</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer__pending" *ngIf="pendingAttachments().length">
+              <button
+                type="button"
+                class="pending-pill"
+                *ngFor="let attachment of pendingAttachments()"
+                (click)="removePendingAttachment(attachment.id)"
+              >
+                <span>{{ attachment.name }}</span>
+                <small>✕</small>
+              </button>
+            </div>
+
+            <div class="composer__field">
+              <textarea
+                #composerTextarea
+                rows="2"
+                [ngModel]="draftMessage()"
+                (ngModelChange)="onDraftChanged($event)"
+                (input)="onTextareaInput($event)"
+                (keydown)="onComposerKeydown($event)"
+                name="prompt"
+                placeholder="Describe the change you want…"
+              ></textarea>
+            </div>
+
+            <div class="composer__actions">
+              <div class="composer__actions-left">
+                <button
+                  type="button"
+                  class="upload-button"
+                  title="Select or upload images"
+                  [class.upload-button--busy]="uploadingCount() > 0"
+                  [disabled]="uploadingCount() > 0"
+                  (click)="showImagePicker.set(true)"
+                >
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M2 12l3.5-4.5 2.5 3L11 7l3 5H2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                    <circle cx="5.5" cy="5.5" r="1.2" stroke="currentColor" stroke-width="1.3"/>
+                    <rect x="0.7" y="0.7" width="14.6" height="14.6" rx="2.3" stroke="currentColor" stroke-width="1.3"/>
+                  </svg>
+                  <span>{{ uploadingCount() > 0 ? 'Uploading…' : 'Image' }}</span>
+                </button>
+
+                <label class="model-select" [title]="selectedModel().label">
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+                    <path d="M7 4v3l2 1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                  </svg>
+                  <select
+                    aria-label="Model selection"
+                    name="model"
+                    [ngModel]="selectedModel().key"
+                    (ngModelChange)="onModelChanged($event)"
+                  >
+                    <option *ngFor="let model of modelOptions" [ngValue]="model.key">{{ model.label }}</option>
+                  </select>
+                </label>
+              </div>
+              <button type="submit" class="send-button" [disabled]="!canSend()">
+                Apply
+                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                  <path d="M2 7h10M8 3l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+
+            <p class="composer__hint">Drop images or use the image button. They're sent as vision context.</p>
+          </form>
+        </ng-container>
+
+        <!-- Versions tab -->
+        <ng-container *ngIf="activeTab() === 'versions'">
+          <section class="versions-pane" aria-label="Version history">
+            <p class="versions-pane__empty" *ngIf="versions().length === 0">No versions yet. Apply a patch to create one.</p>
+            <article
+              class="version-entry"
+              *ngFor="let v of versions(); trackBy: trackByVersion"
+            >
+              <div class="version-entry__meta">
+                <span class="version-badge" [class.version-badge--ok]="v.status === 'applied'" [class.version-badge--err]="v.status === 'rejected'">
+                  {{ v.status | uppercase }}
+                </span>
+                <span class="version-entry__time">{{ v.createdAt | date: 'MMM d, HH:mm' }}</span>
+                <span class="version-entry__label" *ngIf="v.label">{{ v.label }}</span>
+              </div>
+              <button
+                type="button"
+                class="version-entry__restore"
+                (click)="onRestoreVersion(v)"
+                *ngIf="v.status === 'applied'"
+              >Restore</button>
+            </article>
+          </section>
+        </ng-container>
+      </ng-template>
     </aside>
   </div>
 </div>

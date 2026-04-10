@@ -1727,6 +1727,24 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
     return null;
   }
 
+  function findCategoryById(categories, expectedId) {
+    var id = parsePositiveNumber(expectedId, null);
+    if (!id || !Array.isArray(categories) || !categories.length) return null;
+
+    for (var i = 0; i < categories.length; i++) {
+      var category = categories[i];
+      if (parsePositiveNumber(category && category.id, null) === id) return category;
+    }
+
+    return null;
+  }
+
+  function markResolvedWhenNoProductRequest(state) {
+    if (!state || state.loading || state.error || state.selectedCategoryId) return;
+    var hasReference = !!(state.config && (state.config.mode === 'preset' || state.selectedRefName || state.selectedBakeryId));
+    if (hasReference) state.hasResolvedProductRequest = true;
+  }
+
   function applyCategorySelectionPolicy(state) {
     var predefined = state && state.config ? String(state.config.predefinedCategory || '').trim() : '';
 
@@ -1738,7 +1756,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       return;
     }
 
-    var matchedCategory = findCategoryByName(state.categories, predefined);
+    var matchedCategory = findCategoryById(state.categories, predefined) || findCategoryByName(state.categories, predefined);
     var matchedCategoryId = parsePositiveNumber(matchedCategory && matchedCategory.id, null);
 
     if (!matchedCategoryId) {
@@ -1747,6 +1765,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       state.products = [];
       state.filters = null;
       state.allergens = [];
+      markResolvedWhenNoProductRequest(state);
       return;
     }
 
@@ -2078,6 +2097,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
     try {
       state.categories = await fetchCategories(state);
       applyCategorySelectionPolicy(state);
+      markResolvedWhenNoProductRequest(state);
       render(state);
       if (state.selectedCategoryId) {
         await loadProductsData(state);
@@ -2380,6 +2400,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       if (state.selectedRefName || state.selectedBakeryId) {
         state.categories = await fetchCategories(state);
         applyCategorySelectionPolicy(state);
+        markResolvedWhenNoProductRequest(state);
       }
       render(state);
       if (state.selectedCategoryId && (state.selectedRefName || state.selectedBakeryId)) {
@@ -2389,6 +2410,7 @@ export const PRODUCTS_LIST_RUNTIME_SCRIPT = `(function () {
       state.error = error instanceof Error ? error.message : 'Failed to initialize Products List.';
       render(state);
     } finally {
+      markResolvedWhenNoProductRequest(state);
       state.initializing = false;
       render(state);
     }

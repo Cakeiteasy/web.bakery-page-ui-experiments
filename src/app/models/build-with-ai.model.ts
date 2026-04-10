@@ -43,6 +43,7 @@ export interface BuildWithAiChatMessage {
   createdAt: number;
   attachments: BuildWithAiAttachment[];
   target?: BuildWithAiMessageTarget;
+  sectionCaptureWarning?: string;
   errorCategory?: BuildWithAiErrorCategory;
 }
 
