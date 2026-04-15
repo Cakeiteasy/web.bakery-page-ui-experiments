@@ -127,6 +127,7 @@ interface BwaiSectionCapturePendingRequest {
   resolve: (result: BwaiSectionCaptureResult) => void;
   reject: (error: Error) => void;
   timeoutId: ReturnType<typeof setTimeout>;
+  section?: SelectedSection | null;
 }
 
 interface BwaiStyleEditorTarget {
@@ -470,6 +471,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           width: Number(payload.width ?? 0),
           height: Number(payload.height ?? 0)
         });
+        this.downloadCapture(payload.dataUrl, pending.section);
       } else {
         pending.reject(
           this.createSectionCaptureError(
@@ -2403,6 +2405,18 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  private downloadCapture(dataUrl: string, section: SelectedSection | null | undefined): void {
+    const slug = (section?.label ?? 'section').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `screenshot-${slug}-${Date.now()}.png`;
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
   private requestSectionCapture(section: SelectedSection): Promise<BwaiSectionCaptureResult> {
     const win = this.previewIframe?.nativeElement.contentWindow;
     if (!this.iframeReady || !win) {
@@ -2422,7 +2436,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.pendingSectionCaptureRequests.set(requestId, {
         resolve,
         reject,
-        timeoutId
+        timeoutId,
+        section
       });
 
       try {
@@ -2561,7 +2576,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     if (haystack.includes('timeout')) return 'timeout';
     if (
       haystack.includes('renderer') ||
-      haystack.includes('html2canvas') ||
+      haystack.includes('htmltoimage') ||
       haystack.includes('not loaded')
     ) {
       return 'renderer-not-loaded';
@@ -2749,7 +2764,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       })();
     </script>
 
-    <script src="/assets/vendor/html2canvas.min.js"></script>
+    <script src="/assets/vendor/html-to-image.js"></script>
     <script>
       /* ---- section toolbar ---- */
       (function () {
@@ -3335,7 +3350,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           if (haystack.indexOf('timeout') !== -1) return 'timeout';
           if (
             haystack.indexOf('renderer') !== -1 ||
-            haystack.indexOf('html2canvas') !== -1 ||
+            haystack.indexOf('htmltoimage') !== -1 ||
             haystack.indexOf('not loaded') !== -1
           ) {
             return 'renderer-not-loaded';
@@ -3376,82 +3391,21 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
             if (!target && request.selector) target = document.querySelector(String(request.selector));
             if (!target) throw createCaptureError('section-not-found', 'Selected section was not found.');
 
-            if (typeof window.html2canvas !== 'function') {
+            if (typeof window.htmlToImage !== 'object' || typeof window.htmlToImage.toPng !== 'function') {
               throw createCaptureError('renderer-not-loaded', 'Capture renderer is not loaded yet.');
             }
 
             var rect = target.getBoundingClientRect();
-            var scrollX = window.scrollX || window.pageXOffset || 0;
-            var scrollY = window.scrollY || window.pageYOffset || 0;
-            var sectionLeft = rect.left + scrollX;
-            var sectionRight = rect.right + scrollX;
-            var sectionTop = rect.top + scrollY;
-            var sectionBottom = rect.bottom + scrollY;
-
-            var docEl = document.documentElement;
-            var body = document.body;
-            var docWidth = Math.max(
-              docEl.scrollWidth,
-              docEl.clientWidth,
-              body ? body.scrollWidth : 0,
-              body ? body.clientWidth : 0,
-              1
-            );
-            var docHeight = Math.max(
-              docEl.scrollHeight,
-              docEl.clientHeight,
-              body ? body.scrollHeight : 0,
-              body ? body.clientHeight : 0,
-              1
-            );
-
-            var root = document.getElementById('EditableContentRoot');
-            var rootRect = root ? root.getBoundingClientRect() : null;
-            var rootLeft = rootRect ? rootRect.left + scrollX : sectionLeft;
-            var rootRight = rootRect ? rootRect.right + scrollX : sectionRight;
-
-            var cropLeft = Math.floor(Math.max(0, Math.max(sectionLeft, rootLeft)));
-            var cropRight = Math.ceil(Math.min(docWidth, Math.min(sectionRight, rootRight)));
-            if (cropRight <= cropLeft) {
-              cropLeft = Math.floor(Math.max(0, sectionLeft));
-              cropRight = Math.ceil(Math.min(docWidth, sectionRight));
-            }
-            if (cropRight <= cropLeft) {
-              cropRight = Math.min(docWidth, cropLeft + Math.max(1, Math.ceil(rect.width)));
-            }
-            var cropWidth = Math.max(1, cropRight - cropLeft);
-
-            var padTop = Math.max(0, Math.floor(Number(request.paddingTop) || 0));
-            var padBottom = Math.max(0, Math.floor(Number(request.paddingBottom) || 0));
-            var cropTop = Math.max(0, Math.floor(sectionTop - padTop));
-            var cropBottom = Math.min(docHeight, Math.ceil(sectionBottom + padBottom));
-            if (cropBottom <= cropTop) {
-              cropBottom = Math.min(docHeight, cropTop + Math.max(1, Math.ceil(rect.height)));
-            }
-            var cropHeight = Math.max(1, cropBottom - cropTop);
+            var captureWidth = Math.max(1, Math.ceil(rect.width));
+            var captureHeight = Math.max(1, Math.ceil(rect.height));
 
             document.documentElement.classList.add('bwai-capturing');
             try {
-              var canvas = await window.html2canvas(document.body, {
+              var dataUrl = await window.htmlToImage.toPng(target, {
                 backgroundColor: '#ffffff',
-                useCORS: true,
-                logging: false,
-                x: cropLeft,
-                y: cropTop,
-                width: cropWidth,
-                height: cropHeight,
-                scrollX: 0,
-                scrollY: 0,
-                windowWidth: docWidth,
-                windowHeight: docHeight
+                pixelRatio: 1,
+                skipFonts: false
               });
-
-              var dataUrl = '';
-              try {
-                dataUrl = canvas.toDataURL('image/png');
-              } catch (canvasError) {
-                throw createCaptureError('tainted-canvas', canvasError && canvasError.message ? canvasError.message : 'Canvas export failed.');
-              }
 
               parent.postMessage(
                 {
@@ -3460,8 +3414,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
                   success: true,
                   dataUrl: dataUrl,
                   mimeType: 'image/png',
-                  width: canvas.width,
-                  height: canvas.height
+                  width: captureWidth,
+                  height: captureHeight
                 },
                 '*'
               );
@@ -3856,7 +3810,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         var style = document.createElement('style');
         style.textContent = [
           '.bwai-hover{outline:2px dashed #ff3399!important;outline-offset:-2px}',
-          '.bwai-selected{outline:2px solid #ff3399!important;outline-offset:-2px;background-color:rgba(255,51,153,0.04)!important}',
+          '.bwai-selected{outline:2px solid #ff3399!important;outline-offset:-2px;}',
           '.bwai-hidden{opacity:0.25!important;max-height:50px!important;overflow:hidden!important}',
           '.bwai-toolbar{position:absolute;top:10px;left:10px;z-index:99999;display:flex;gap:5px;pointer-events:all}',
           '.bwai-group{display:flex;background:#fff;border:1px solid rgba(0,0,0,0.1);border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.12);overflow:hidden}',
@@ -3871,7 +3825,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           '.bwai-insert-sep{height:1px;background:#f0f0f0;margin:4px 0}',
           '.bwai-insert-custom{color:#888!important;font-style:italic}',
           '.bwai-style-target{outline:2px solid #1d9bf0!important;outline-offset:1px;box-shadow:0 0 0 2px rgba(29,155,240,0.18)!important}',
-          '.bwai-capturing .bwai-hover,.bwai-capturing .bwai-selected{outline:none!important;background:transparent!important}',
+          '.bwai-capturing .bwai-hover,.bwai-capturing .bwai-selected{outline:none!important;}',
           '.bwai-capturing .bwai-style-target{outline:none!important;box-shadow:none!important}',
           '.bwai-capturing .bwai-toolbar,.bwai-capturing .bwai-insert-popup{display:none!important}'
         ].join('');
