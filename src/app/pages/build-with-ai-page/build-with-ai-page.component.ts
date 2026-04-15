@@ -471,7 +471,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           width: Number(payload.width ?? 0),
           height: Number(payload.height ?? 0)
         });
-        this.downloadCapture(payload.dataUrl, pending.section);
+        // this.downloadCapture(payload.dataUrl, pending.section);
       } else {
         pending.reject(
           this.createSectionCaptureError(
@@ -1569,6 +1569,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     if (selectedTarget) {
       const sectionCapture = await this.captureSelectedSectionAttachment(selectedTarget);
       if (sectionCapture.attachment) {
+        console.log('sectionCapture.attachment: ', sectionCapture.attachment);
         attachments = [...manualAttachments, sectionCapture.attachment];
       }
       if (sectionCapture.warning) {
