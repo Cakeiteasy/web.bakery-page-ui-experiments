@@ -79,17 +79,18 @@ export const BUILD_WITH_AI_CONTEXT_WARNING_RATIO = 0.8;
 
 export const BUILD_WITH_AI_COMPONENT_LIBRARY_PROMPT = `
 Component and style library guidance (hidden from user UI):
-- Brand palette anchors: #FF3399, #F9F9F9, #F7F3F0, #333333, #858585, #6D7278, #EBEBEB, #FFFFFF.
-- Typography pairing: Recoleta-like heading + Lato-like body (fallback serif/sans allowed).
-- Reusable components to prefer when useful:
-  1) Hero block with eyebrow, title, subtitle, CTA row.
-  2) Feature cards (2-4 columns desktop, 1 column mobile).
-  3) Testimonial quotes grid.
-  4) Metric counters row.
-  5) CTA banner with button pair.
-  6) FAQ accordion.
-  7) Logo cloud.
-  8) Contact form section.
-- Components should stay visually unified with shared spacing scale, radius, shadows, and color tokens.
+- Brand palette anchors via CSS vars: var(--lp-primary) #FF3399, var(--lp-cream) #F9F9F9, var(--lp-warm) #F7F3F0, var(--lp-dark) #333333, var(--lp-muted) #858585, var(--lp-border) #EBEBEB, var(--lp-white) #FFFFFF.
+- Typography: use font-[family-name:var(--lp-serif)] for headings, font-[family-name:var(--lp-sans)] for body.
+- Use Tailwind CSS utility classes for all styling. Build components with utilities, not custom CSS classes.
+- Reusable component patterns (all Tailwind-based):
+  1) Hero: py-20 md:py-32 text-center, eyebrow with uppercase tracking-widest text-sm, large heading, CTA row with gap-4.
+  2) Feature cards: grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6, each card p-6 rounded-xl shadow-md.
+  3) Testimonial quotes: grid or flex, avatar rounded-full, italic quote text.
+  4) Metric counters: flex flex-wrap justify-center gap-8 md:gap-16, text-4xl font-bold for numbers.
+  5) CTA banner: bg-[var(--lp-primary)] text-white py-16 text-center, prominent rounded button.
+  6) FAQ accordion: space-y-4, border rounded-lg items, toggle via content.js.
+  7) Logo cloud: flex flex-wrap justify-center items-center gap-8, grayscale opacity-60 hover:opacity-100.
+  8) Contact form: max-w-lg mx-auto, inputs with rounded-lg border px-4 py-3 focus:ring-2.
+- Components should stay visually unified with consistent spacing, border-radius, and color tokens.
 - You are not limited to this library. You may suggest or create additional components if they improve the result.
 `;

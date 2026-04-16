@@ -8,6 +8,7 @@ import {
   BuildWithAiEditApplyResult,
   BuildWithAiSearchReplaceEdit
 } from '../models/build-with-ai.model';
+import { TW_START_MARKER, TW_END_MARKER } from '../../../lib/tailwind-markers';
 
 interface BuildWithAiDiffApplyOptions {
   allowGlobalStyleOverride?: boolean;
@@ -55,6 +56,15 @@ export class BuildWithAiDiffService {
           ...resultBase,
           status: 'error',
           error: 'Protected global styles cannot be changed by default. Add [ALLOW_STYLE_OVERRIDE] to your latest message if this change is intentional.'
+        });
+        continue;
+      }
+
+      if (edit.file === 'content.css' && this.touchesTailwindMarkers(edit.search ?? '', edit.value ?? '')) {
+        editResults.push({
+          ...resultBase,
+          status: 'error',
+          error: 'Cannot edit the compiled Tailwind CSS block. Tailwind styles are auto-generated from HTML classes.'
         });
         continue;
       }
@@ -158,6 +168,11 @@ export class BuildWithAiDiffService {
   private isBraceOnlySearch(value: string): boolean {
     const compact = value.replace(/\s/g, '');
     return compact.length >= 2 && /^}+$/.test(compact);
+  }
+
+  private touchesTailwindMarkers(search: string, value: string): boolean {
+    const combined = `${search}\n${value}`;
+    return combined.includes(TW_START_MARKER) || combined.includes(TW_END_MARKER);
   }
 
   private touchesProtectedCssSurface(search: string, value: string): boolean {

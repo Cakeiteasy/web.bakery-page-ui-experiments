@@ -6,6 +6,7 @@ import { ObjectId } from 'mongodb';
 
 import { COMPONENT_LIBRARY_PROMPT, SYSTEM_PROMPT } from './build-with-ai.prompt.js';
 import clientPromise, { dbName } from '../lib/mongodb.js';
+import { stripTailwindFromCss } from '../lib/tailwind-markers.js';
 
 interface IncomingAttachment {
   id: string;
@@ -134,7 +135,7 @@ export default async function handler(req: any, res: any): Promise<void> {
       '--- content.html ---',
       payload.files.html,
       '--- content.css ---',
-      payload.files.css,
+      stripTailwindFromCss(payload.files.css),
       '--- content.js ---',
       payload.files.js
     ].join('\n');
@@ -153,7 +154,7 @@ export default async function handler(req: any, res: any): Promise<void> {
 
     const styleOverrideInstruction = payload.allowGlobalStyleOverride
       ? 'This request explicitly allows global style overrides via [ALLOW_STYLE_OVERRIDE]. Protected global styles may be modified if necessary.'
-      : 'This request does not allow global style overrides. Do not modify protected global styles in content.css (:root, @import, .lp-btn*, .lp-eyebrow*).';
+      : 'This request does not allow global style overrides. Do not modify protected global styles in content.css (:root, @import, .lp-btn*, .lp-eyebrow*). Use Tailwind CSS utility classes in content.html for all styling.';
     systemPrompt = `${styleOverrideInstruction}\n${systemPrompt}`;
 
     const promptChars = systemPrompt.length + messages.reduce((n, m) => n + JSON.stringify(m.content).length, 0);

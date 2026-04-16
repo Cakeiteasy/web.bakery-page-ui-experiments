@@ -2482,7 +2482,8 @@ export function buildPublishedDocument(
     <title>${esc(title)}</title>
     ${metaTags}
     <link id="BuildWithAiThemeFonts" href="${esc(themeFontHref)}" rel="stylesheet" />
-    <style>${STATIC_SHELL_CSS}</style>
+    <style>@layer properties, theme, base, components, utilities;</style>
+    <style>@layer base { ${STATIC_SHELL_CSS} }</style>
     <style id="BuildWithAiContentStyle">${safeCss}</style>
     <style id="BuildWithAiThemeStyle">${themeCss}</style>${hiddenCss ? `\n    <style>${hiddenCss}</style>` : ''}
   </head>

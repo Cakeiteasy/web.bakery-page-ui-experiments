@@ -16,21 +16,24 @@ Structure constraints:
 - A non-editable shell runtime already handles section reveal ('in-view') behavior for lp sections. In content.js, add only page-specific behavior and do not attempt to replace core reveal logic.
 
 Design direction:
-- Use the lp- design system already provided by the preview shell:
-  - Colors: --lp-primary (#ff3399), --lp-primary-mid, --lp-primary-soft, --lp-primary-faint, --lp-cream, --lp-warm, --lp-dark, --lp-text, --lp-muted, --lp-border, --lp-white, --lp-gold
-  - Fonts: var(--lp-serif) for headings, var(--lp-sans) for body text
-  - Utilities: .lp-btn, .lp-btn--primary, .lp-btn--outline, .lp-btn--white, .lp-btn--lg, .lp-eyebrow, .lp-eyebrow--center
-  - Layout: --lp-w (max-width container), --lp-gap (section spacing)
-  - Radius tokens: --lp-r-sm, --lp-r-md, --lp-r-lg, --lp-r-xl
-  - Shadow tokens: --lp-shadow, --lp-shadow-rose
-  - Section classes: .lp-hero, .lp-trust, .lp-stats-bar, .lp-props, .lp-how, .lp-showcase, .lp-proof, .lp-guarantee, .lp-faq, .lp-cta-final, .lp-products-list
+- Use Tailwind CSS v4 utility classes for ALL content styling in content.html.
+- Prefer Tailwind utility classes over writing custom CSS in content.css. Use content.css only for styles that genuinely cannot be expressed with utilities (complex animations, very specific pseudo-element work, etc.).
+- Responsive design: use sm:, md:, lg:, xl: prefixes for breakpoints.
+- The shell provides CSS custom properties you can reference via Tailwind arbitrary values:
+  - Brand colors: --lp-primary, --lp-primary-mid, --lp-primary-soft, --lp-primary-faint
+  - Neutrals: --lp-cream, --lp-warm, --lp-dark, --lp-text, --lp-muted, --lp-border, --lp-white, --lp-gold
+  - Fonts: --lp-serif (headings), --lp-sans (body)
+  - Layout: --lp-w (max-width), --lp-gap (section spacing)
+  - Example usage: text-[var(--lp-primary)], bg-[var(--lp-cream)], font-[family-name:var(--lp-serif)], max-w-[var(--lp-w)]
 - DO NOT re-import fonts or redefine :root tokens — they are already provided by the preview shell.
-- Core LP style foundations are non-editable shell styles. Treat content.css as additive page-level custom styles by default.
 - DO NOT redefine protected global styles by default: :root, @import, .lp-btn*, .lp-eyebrow*.
 - You may modify those protected global styles only when the latest user message explicitly includes [ALLOW_STYLE_OVERRIDE].
 - Prefer meaningful sections: hero, cards, feature lists, testimonials, FAQ, metrics, CTA.
-- You may add new CSS classes beyond the design system when useful, but stay consistent with the existing tokens.
-- When overriding .lp-showcase__grid columns, always also set grid-template-rows: auto to prevent phantom empty rows inherited from the base CSS.
+- Common Tailwind patterns for sections:
+  - Full-width section: <section class="py-16 md:py-24 px-4"><div class="max-w-[var(--lp-w)] mx-auto">...</div></section>
+  - Section heading: <h2 class="text-3xl md:text-5xl font-bold font-[family-name:var(--lp-serif)] text-[var(--lp-dark)]">
+  - CTA button: <a class="inline-block px-8 py-3 bg-[var(--lp-primary)] text-white rounded-lg font-semibold hover:opacity-90 transition-opacity">
+  - Card grid: <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
 Products List section contract:
 - For dynamic product lists, use data attributes on the section root instead of custom fetch logic:
@@ -81,14 +84,15 @@ Edit rules:
 `;
 
 export const COMPONENT_LIBRARY_PROMPT = `
-Hidden component library guidance:
-- Hero section with CTA pair.
-- Feature card grid (2-4 columns desktop, 1 on mobile).
-- Metrics row with emphasized numbers.
-- FAQ accordion.
-- Testimonial cards.
-- CTA banner.
-- Contact form section.
+Hidden component library guidance (all built with Tailwind CSS utilities):
+
+- Hero section: full-width with py-20 md:py-32, centered text, CTA button pair.
+- Feature card grid: grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6, each card with rounded-xl shadow-md p-6.
+- Metrics/stats row: flex flex-wrap justify-center gap-8, large numbers with text-4xl font-bold.
+- FAQ accordion: space-y-4, each item with border rounded-lg, toggle via content.js.
+- Testimonial cards: grid or flex layout, avatar + quote + attribution.
+- CTA banner: bg-[var(--lp-primary)] text-white py-16 text-center with prominent button.
+- Contact form: max-w-lg mx-auto, styled inputs with rounded-lg border focus:ring-2.
 - Products List section using data-cie-component="products-list" contract.
 
 Use these as default building blocks, but expand beyond them when user requests it.

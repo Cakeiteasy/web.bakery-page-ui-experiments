@@ -57,6 +57,7 @@ import {
   BwaiImagePickerModalComponent,
   UnsplashPickerSelection
 } from './bwai-image-picker-modal/bwai-image-picker-modal.component';
+import { stripTailwindFromCss } from '../../../../lib/tailwind-markers';
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'build-with-ai-sidebar-width';
 const SIDEBAR_WIDTH_DEFAULT = 360;
@@ -605,9 +606,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.pages.set(allPages);
 
       const rawFiles = page.currentFiles ?? { html: '', css: '', js: '' };
+      const strippedCss = stripTailwindFromCss(rawFiles.css);
       const normalized = this.normalizeHtml(rawFiles.html);
       const { html: htmlWithIds, changed: idsAdded } = this.ensureSectionIds(normalized);
-      const files = { ...rawFiles, html: htmlWithIds };
+      const files = { ...rawFiles, css: strippedCss, html: htmlWithIds };
       this.files.set(files);
       this.markSectionCaptureContentChanged('page-loaded');
       if (idsAdded) {
@@ -842,7 +844,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     try {
       const restoredFiles = await this.bwaiPageService.restoreVersionAsync(page.id, version.id);
       const { html: restoredHtmlWithIds } = this.ensureSectionIds(this.normalizeHtml(restoredFiles.html));
-      const files = { ...restoredFiles, html: restoredHtmlWithIds };
+      const files = { ...restoredFiles, css: stripTailwindFromCss(restoredFiles.css), html: restoredHtmlWithIds };
       this.files.set(files);
       this.markSectionCaptureContentChanged('version-restored');
       this.currentPage.update((p) => p ? { ...p, currentFiles: files } : p);
@@ -2701,8 +2703,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Build with AI preview</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link id="BuildWithAiThemeFonts" href="${themeFontHref}" rel="stylesheet" />
-    <style>${BUILD_WITH_AI_STATIC_SHELL_CSS}</style>
+    <style>@layer base { ${BUILD_WITH_AI_STATIC_SHELL_CSS} }</style>
     <style id="BuildWithAiContentStyle">${safeCss}</style>
     <style id="BuildWithAiThemeStyle">${themeCss}</style>${hiddenCss ? `\n    <style id="BuildWithAiHiddenSections">${hiddenCss}</style>` : ''}
   </head>

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { ObjectId } from 'mongodb';
 import clientPromise, { dbName } from '../lib/mongodb.js';
+import { compileTailwindForPage, mergeTailwindIntoCss, stripTailwindFromCss } from '../lib/tailwind-compiler.js';
 
 const COLLECTION = 'bwai_pages';
 
@@ -127,6 +128,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const patch: Record<string, unknown> = { updatedAt: new Date() };
       for (const key of allowedFields) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+
+      if (patch['currentFiles']) {
+        const files = patch['currentFiles'] as { html: string; css: string; js: string };
+        if (files.html?.trim()) {
+          try {
+            const customCss = stripTailwindFromCss(files.css ?? '');
+            const tailwindCss = await compileTailwindForPage(files.html);
+            files.css = mergeTailwindIntoCss(tailwindCss, customCss);
+            patch['currentFiles'] = files;
+          } catch (err) {
+            console.error('[pages] Tailwind compilation failed, saving without compiled Tailwind:', err);
+          }
+        }
       }
 
       const result = await col.findOneAndUpdate(
