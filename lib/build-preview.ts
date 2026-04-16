@@ -124,9 +124,12 @@ function resolveTheme(theme: BwaiThemeMeta = {}): BwaiResolvedTheme {
   }) || BWAI_THEME_FONT_PRESETS[0];
 
   var primary = normalizeHexColor(theme.accentColor, DEFAULT_THEME_PRIMARY);
-  var mid = mixHexColors(primary, '#ffffff', 0.68);
-  var soft = mixHexColors(primary, '#ffffff', 0.17);
-  var faint = mixHexColors(primary, '#ffffff', 0.07);
+  // mid   ≈ 28% white  → moderate tint (e.g. #ff3399 → #ff6bbf)
+  // soft  ≈ 81% white  → light tint    (e.g. #ff3399 → #ffd9ec)
+  // faint ≈ 93% white  → near-white    (e.g. #ff3399 → #fff0f7)
+  var mid = mixHexColors(primary, '#ffffff', 0.28);
+  var soft = mixHexColors(primary, '#ffffff', 0.81);
+  var faint = mixHexColors(primary, '#ffffff', 0.93);
 
   var r = parseInt(primary.slice(1, 3), 16);
   var g = parseInt(primary.slice(3, 5), 16);
