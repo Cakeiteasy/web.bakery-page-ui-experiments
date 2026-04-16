@@ -113,12 +113,27 @@ export class BuildWithAiDiffService {
             continue;
           }
 
+          // Stage 2: collapsed-whitespace fallback
+          const { text: collapsedCurrent, map: currentMap } = this.collapseWhitespace(normalizedCurrent);
+          const { text: collapsedAnchor } = this.collapseWhitespace(normalizedSearch);
+          if (collapsedAnchor) {
+            const collapsedIdx = collapsedCurrent.indexOf(collapsedAnchor);
+            if (collapsedIdx >= 0) {
+              const origEnd = currentMap[collapsedIdx + collapsedAnchor.length - 1] + 1;
+              nextFiles[contentKey] =
+                normalizedCurrent.slice(0, origEnd) +
+                edit.value +
+                normalizedCurrent.slice(origEnd);
+              touchedFiles.add(edit.file);
+              editResults.push({ ...resultBase, status: 'matched' });
+              continue;
+            }
+          }
+
           if (
             edit.file === 'content.css' &&
             this.isBraceOnlySearch(edit.search)
           ) {
-            // AI occasionally uses a generic trailing brace snippet as anchor for CSS section append.
-            // If no exact match exists, append at EOF instead of rejecting the whole patch.
             anchorEnd = currentContent.length;
           }
         }
@@ -139,24 +154,86 @@ export class BuildWithAiDiffService {
         continue;
       }
 
-      if (!currentContent.includes(edit.search)) {
+      const replaceResult = this.findAndReplace(currentContent, edit.search, edit.value);
+      if (replaceResult === null) {
         editResults.push({ ...resultBase, status: 'unmatched', error: `Search string not found in ${edit.file}.` });
         continue;
       }
 
-      nextFiles[contentKey] = currentContent.replace(edit.search, edit.value);
+      nextFiles[contentKey] = replaceResult;
       touchedFiles.add(edit.file);
       editResults.push({ ...resultBase, status: 'matched' });
     }
 
     const ok = editResults.every(r => r.status === 'matched');
+    const partialOk = !ok && editResults.some(r => r.status === 'matched');
 
     return {
       files: nextFiles,
       touchedFiles: Array.from(touchedFiles),
       editResults,
-      ok
+      ok,
+      partialOk
     };
+  }
+
+  /**
+   * Cascading search-and-replace: exact → CRLF-normalized → whitespace-collapsed.
+   * Returns the new content string on match, or null when no stage matches.
+   */
+  private findAndReplace(content: string, search: string, value: string): string | null {
+    // Stage 0: exact match
+    const exactIdx = content.indexOf(search);
+    if (exactIdx >= 0) {
+      return content.slice(0, exactIdx) + value + content.slice(exactIdx + search.length);
+    }
+
+    // Stage 1: CRLF → LF normalization
+    const normContent = content.replace(/\r\n/g, '\n');
+    const normSearch = search.replace(/\r\n/g, '\n');
+    const crlfIdx = normContent.indexOf(normSearch);
+    if (crlfIdx >= 0) {
+      return normContent.slice(0, crlfIdx) + value + normContent.slice(crlfIdx + normSearch.length);
+    }
+
+    // Stage 2: collapse whitespace runs (space/tab/newline → single space, trimmed lines)
+    const { text: collapsedContent, map: contentMap } = this.collapseWhitespace(normContent);
+    const { text: collapsedSearch } = this.collapseWhitespace(normSearch);
+
+    if (!collapsedSearch) return null;
+
+    const collapsedIdx = collapsedContent.indexOf(collapsedSearch);
+    if (collapsedIdx < 0) return null;
+
+    const origStart = contentMap[collapsedIdx];
+    const origEnd = contentMap[collapsedIdx + collapsedSearch.length - 1] + 1;
+    return normContent.slice(0, origStart) + value + normContent.slice(origEnd);
+  }
+
+  /**
+   * Collapses all whitespace runs to a single space and returns a character-index
+   * map from each position in the collapsed string back to its original position.
+   */
+  private collapseWhitespace(input: string): { text: string; map: number[] } {
+    const chars: string[] = [];
+    const map: number[] = [];
+    let prevWasSpace = true; // treat start as if preceded by space to trim leading ws
+    for (let i = 0; i < input.length; i++) {
+      if (/\s/.test(input[i])) {
+        prevWasSpace = true;
+      } else {
+        if (!prevWasSpace || chars.length === 0) {
+          // nothing — just append the char below
+        } else if (chars.length > 0) {
+          chars.push(' ');
+          map.push(i);
+        }
+        chars.push(input[i]);
+        map.push(i);
+        prevWasSpace = false;
+      }
+    }
+    return { text: chars.join(''), map };
   }
 
   private toContentKey(fileName: BuildWithAiEditableFileName): keyof BuildWithAiEditableFiles {

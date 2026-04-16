@@ -1,4 +1,4 @@
-export type BwaiAiLogApplyStatus = 'applied' | 'rejected' | 'error';
+export type BwaiAiLogApplyStatus = 'applied' | 'rejected' | 'partial' | 'error';
 export type BwaiAiLogEditStatus = 'matched' | 'unmatched' | 'error';
 
 export interface BwaiAiLogEditResult {

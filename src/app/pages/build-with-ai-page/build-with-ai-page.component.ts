@@ -1705,8 +1705,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     };
   }
 
-  private async generateAndApplyPatch(): Promise<void> {
-    this.processing.set(true);
+  private async generateAndApplyPatch(retryAttempt = 0): Promise<void> {
+    const isTopLevel = retryAttempt === 0;
+    if (isTopLevel) {
+      this.processing.set(true);
+    }
     let lastRawDiff: string | null = null;
     let logId: string | undefined;
     let lastEdits: BuildWithAiSearchReplaceEdit[] = [];
@@ -1755,12 +1758,13 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       lastApplyResults = diffResult.editResults;
       lastTouchedFiles = [...diffResult.touchedFiles];
 
-      // Check for unmatched edits before syntax validation
-      if (!diffResult.ok) {
-        const unmatchedDetails = diffResult.editResults
-          .filter(r => r.status !== 'matched')
-          .map(r => `${r.file}: ${r.error ?? r.status}`)
-          .join(' | ');
+      const unmatchedEdits = diffResult.editResults.filter(r => r.status !== 'matched');
+      const unmatchedDetails = unmatchedEdits
+        .map(r => `${r.file}: ${r.error ?? r.status}`)
+        .join(' | ');
+
+      // Full rejection: zero edits matched
+      if (!diffResult.ok && !diffResult.partialOk) {
         const hasStyleOverrideHint = unmatchedDetails.includes('[ALLOW_STYLE_OVERRIDE]');
         const assistantRejectionText = [
           response.assistantText || 'Patch could not be applied — some edits did not match the current file content.',
@@ -1798,6 +1802,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         void this.persistToMongo({ messages: this.messages(), patchLogs: this.patchLogs() });
         if (page) {
           void this.bwaiPageService.saveVersionAsync(page.id, { files: this.files(), diff: JSON.stringify(response.edits), status: 'rejected' });
+        }
+
+        if (retryAttempt === 0 && this.hasRetryableUnmatched(diffResult.editResults)) {
+          this.injectRetryCorrection(diffResult.editResults);
+          await this.generateAndApplyPatch(1);
         }
         return;
       }
@@ -1840,18 +1849,24 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         return;
       }
 
+      const isPartial = diffResult.partialOk;
+      const applyStatus: 'applied' | 'partial' = isPartial ? 'partial' : 'applied';
+
       const patchedHtml = this.normalizeHtml(diffResult.files.html);
       const { html: patchedHtmlWithIds } = this.ensureSectionIds(patchedHtml);
       const nextFiles = { ...diffResult.files, html: patchedHtmlWithIds };
       this.files.set(nextFiles);
       this.markSectionCaptureContentChanged('patch-applied');
-      this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
+      this.pushPatchLog(JSON.stringify(response.edits), applyStatus, isPartial
+        ? `Partial apply (${unmatchedEdits.length} skipped): ${unmatchedDetails}`
+        : `Touched ${diffResult.touchedFiles.join(', ')}`);
 
       if (logId) {
         this.updateLogWithRetry(logId, {
           edits: response.edits,
           applyResults: diffResult.editResults,
-          applyStatus: 'applied',
+          applyStatus,
+          rejectionReason: isPartial ? `Partial — skipped edits: ${unmatchedDetails}` : undefined,
           warnings: response.warnings,
           afterFileHashes: this.buildFileHashes(nextFiles),
           touchedFiles: diffResult.touchedFiles
@@ -1859,12 +1874,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       }
 
       const warningsText = response.warnings.length ? `\n\nWarnings:\n- ${response.warnings.join('\n- ')}` : '';
+      const partialWarning = isPartial
+        ? `\n\nNote: ${unmatchedEdits.length} of ${response.edits.length} edits could not be matched and were skipped.`
+        : '';
       this.messages.update((messages) => [
         ...messages,
         {
           id: this.createId('assistant'),
           role: 'assistant',
-          text: `${response.assistantText}${warningsText}`.trim(),
+          text: `${response.assistantText}${partialWarning}${warningsText}`.trim(),
           createdAt: Date.now(),
           attachments: []
         }
@@ -1874,10 +1892,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       if (page) {
         void Promise.all([
           this.persistToMongo({ currentFiles: nextFiles, messages: this.messages(), patchLogs: this.patchLogs() }),
-          this.bwaiPageService.saveVersionAsync(page.id, { files: nextFiles, diff: JSON.stringify(response.edits), status: 'applied' }).then((v) => {
+          this.bwaiPageService.saveVersionAsync(page.id, { files: nextFiles, diff: JSON.stringify(response.edits), status: applyStatus }).then((v) => {
             this.versions.update((vs) => [v, ...vs]);
           })
         ]);
+      }
+
+      if (isPartial && retryAttempt === 0 && this.hasRetryableUnmatched(diffResult.editResults)) {
+        this.injectRetryCorrection(diffResult.editResults);
+        await this.generateAndApplyPatch(1);
       }
     } catch (error) {
       if (lastRawDiff) {
@@ -1917,7 +1940,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       }
       void this.persistToMongo({ messages: this.messages(), patchLogs: this.patchLogs() });
     } finally {
-      this.processing.set(false);
+      if (isTopLevel) {
+        this.processing.set(false);
+      }
     }
   }
 
@@ -1942,6 +1967,32 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         }
       }
     })();
+  }
+
+  private hasRetryableUnmatched(editResults: { status: string }[]): boolean {
+    return editResults.some(r => r.status === 'unmatched');
+  }
+
+  private injectRetryCorrection(editResults: { file: string; search: string; status: string }[]): void {
+    const failedSummary = editResults
+      .filter(r => r.status === 'unmatched')
+      .map(r => `- File "${r.file}": search string starting with "${r.search.slice(0, 80)}${r.search.length > 80 ? '…' : ''}"`)
+      .join('\n');
+    const correctionText =
+      `[AUTO-RETRY] Some edits failed because their search strings did not match the current file content.\n\n` +
+      `Failed edits:\n${failedSummary}\n\n` +
+      `Please re-read the current file content provided above and produce corrected edits for only the failed items. ` +
+      `Copy the "search" value character-for-character from the current file.`;
+    this.messages.update((msgs) => [
+      ...msgs,
+      {
+        id: this.createId('user'),
+        role: 'user' as const,
+        text: correctionText,
+        createdAt: Date.now(),
+        attachments: []
+      }
+    ]);
   }
 
   private buildFileHashes(files: BuildWithAiEditableFiles): BwaiAiLogFileHashes {
@@ -1983,9 +2034,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     const productsListContext = this.buildProductsListContextSuffix(target.outerHtml);
 
     const contextPrefix =
-      `[Editing section: ${label} (${reference}, position ${safePosition})]\n` +
-      `[Exact selector: ${target.selector}]\n` +
-      `Section HTML:\n${target.outerHtml}${productsListContext}\n\n` +
+      `Edit ONLY this section according to the user request: ${target.selector}\n` +
       `User request: `;
 
     return [

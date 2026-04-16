@@ -53,7 +53,7 @@ export interface BuildWithAiPatchLogEntry {
   id: string;
   createdAt: number;
   diff: string;
-  status: 'applied' | 'rejected';
+  status: 'applied' | 'rejected' | 'partial';
   details: string;
 }
 
@@ -126,6 +126,7 @@ export interface BuildWithAiDiffApplyResult {
   touchedFiles: BuildWithAiEditableFileName[];
   editResults: BuildWithAiEditApplyResult[];
   ok: boolean;
+  partialOk: boolean;
 }
 
 export const BUILD_WITH_AI_FILE_NAMES: BuildWithAiEditableFileName[] = [
