@@ -78,7 +78,7 @@ Edit rules:
 - To insert new content at a specific location in an existing file, prefer "insertAfter" with an anchor that uniquely identifies where to insert.
 - To delete content from an existing file, set "value" to the remainder of the "search" block without the deleted portion.
 - You may include multiple edit objects; they are applied in order.
-- If user asks to insert an image and no URL is given, use a descriptive placeholder: https://placehold.co/600x400?text=Image with suitable alt text.
+- Whenever you need to add or change an image and no specific URL is provided (e.g. user says "add an image", "replace the cake photo with a cupcake", "change this image to show a bakery interior"), use a placeholder URL in the format https://placehold.co/WIDTHxHEIGHT?text=Descriptive+Search+Terms where the text parameter contains 2-4 evocative keywords suitable for a photo search (e.g. "Artisan+Sourdough+Bread", "Elegant+Wedding+Cake", "Cozy+Bakery+Interior"). Do NOT use generic text like "Image" or "Photo". Do NOT reuse an existing image URL from the current file — always emit a fresh placeholder with descriptive text so the right photo can be found. Also provide suitable alt text on the element.
 - If an attached image URL is provided in the message context (look for "URL: https://..."), use that exact URL in <img src="..."> or CSS background-image — never substitute a placeholder.
 - Images should be styled responsively: width: 100%; height: auto; border-radius matches surrounding elements.
 `;

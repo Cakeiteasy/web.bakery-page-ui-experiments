@@ -32,6 +32,7 @@ import { BuildWithAiContextMeterService } from '../../services/build-with-ai-con
 import { BuildWithAiDiffService } from '../../services/build-with-ai-diff.service';
 import { BuildWithAiSessionService } from '../../services/build-with-ai-session.service';
 import { BuildWithAiSyntaxValidatorService } from '../../services/build-with-ai-syntax-validator.service';
+import { BuildWithAiUnsplashService } from '../../services/build-with-ai-unsplash.service';
 import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
 import { BwaiPageService } from '../../services/bwai-page.service';
 import {
@@ -70,6 +71,8 @@ const SECTION_CAPTURE_PREPARE_DEBOUNCE_MS = 180;
 const SECTION_CAPTURE_WAIT_ON_SEND_MS = 1_500;
 const SECTION_CAPTURE_MAX_UPLOAD_WIDTH_PX = 1440;
 const SECTION_CAPTURE_JPEG_AREA_THRESHOLD = 2_200_000;
+// Set to true to skip screenshot capture during AI calls (temporary, for testing)
+const DISABLE_SECTION_CAPTURE = true;
 const STYLE_EDITOR_DEFAULT_TEXT_COLOR = '#2a2018';
 const STYLE_EDITOR_DEFAULT_BG_COLOR = '#ffffff';
 const STYLE_EDITOR_DEFAULT_DRAFT: BwaiStyleDraft = {
@@ -180,6 +183,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private readonly diffService = inject(BuildWithAiDiffService);
   private readonly sessionService = inject(BuildWithAiSessionService);
   private readonly syntaxValidator = inject(BuildWithAiSyntaxValidatorService);
+  private readonly unsplashService = inject(BuildWithAiUnsplashService);
   private readonly domSanitizer = inject(DomSanitizer);
   private readonly bwaiPageService = inject(BwaiPageService);
   private readonly aiLogService = inject(BwaiAiLogService);
@@ -1568,7 +1572,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     let sectionCaptureWarning: string | undefined;
     this.activeError.set(null);
 
-    if (selectedTarget) {
+    if (selectedTarget && !DISABLE_SECTION_CAPTURE) {
       const sectionCapture = await this.captureSelectedSectionAttachment(selectedTarget);
       if (sectionCapture.attachment) {
         console.log('sectionCapture.attachment: ', sectionCapture.attachment);
@@ -1744,15 +1748,17 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       );
 
       logId = response.logId;
-      lastEdits = response.edits;
       lastWarnings = response.warnings ?? [];
 
       if (!response.edits?.length) {
         throw new Error('AI response did not include any edits.');
       }
 
-      lastRawDiff = JSON.stringify(response.edits);
-      const diffResult = this.diffService.applyEdits(beforeFiles, response.edits, {
+      const enrichedEdits = await this.unsplashService.replacePlaceholders(response.edits);
+      lastEdits = enrichedEdits;
+
+      lastRawDiff = JSON.stringify(enrichedEdits);
+      const diffResult = this.diffService.applyEdits(beforeFiles, enrichedEdits, {
         allowGlobalStyleOverride
       });
       lastApplyResults = diffResult.editResults;

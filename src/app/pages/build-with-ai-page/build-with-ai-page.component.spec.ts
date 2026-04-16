@@ -10,6 +10,7 @@ import { BuildWithAiDiffService } from '../../services/build-with-ai-diff.servic
 import { BwaiPageService } from '../../services/bwai-page.service';
 import { BuildWithAiSessionService } from '../../services/build-with-ai-session.service';
 import { BuildWithAiSyntaxValidatorService } from '../../services/build-with-ai-syntax-validator.service';
+import { BuildWithAiUnsplashService } from '../../services/build-with-ai-unsplash.service';
 import { BuildWithAiPageComponent, SelectedSection } from './build-with-ai-page.component';
 
 describe('BuildWithAiPageComponent', () => {
@@ -68,6 +69,10 @@ describe('BuildWithAiPageComponent', () => {
 
   let aiLogServiceStub: {
     updateLogAsync: jasmine.Spy;
+  };
+
+  let unsplashServiceStub: {
+    replacePlaceholders: jasmine.Spy;
   };
 
   let routerStub: {
@@ -133,6 +138,10 @@ describe('BuildWithAiPageComponent', () => {
       updateLogAsync: jasmine.createSpy('updateLogAsync').and.resolveTo(undefined)
     };
 
+    unsplashServiceStub = {
+      replacePlaceholders: jasmine.createSpy('replacePlaceholders').and.callFake((edits: any) => Promise.resolve(edits))
+    };
+
     routerStub = {
       navigate: jasmine.createSpy('navigate').and.resolveTo(true)
     };
@@ -147,6 +156,7 @@ describe('BuildWithAiPageComponent', () => {
         { provide: BuildWithAiContextMeterService, useValue: contextMeterStub },
         { provide: BwaiPageService, useValue: pageServiceStub },
         { provide: BwaiAiLogService, useValue: aiLogServiceStub },
+        { provide: BuildWithAiUnsplashService, useValue: unsplashServiceStub },
         {
           provide: ActivatedRoute,
           useValue: { paramMap: of(convertToParamMap({})) }
