@@ -207,7 +207,7 @@ export default async function handler(req: any, res: any): Promise<void> {
       model,
       system: systemPrompt,
       messages,
-      ...(modelConfig.reasoningModel ? {} : { temperature: 0.2 }),
+      ...(modelConfig.reasoningModel ? {} : { temperature: 0.9 }),
       providerOptions: modelConfig.provider === 'google'
         ? { google: { generationConfig: { responseMimeType: 'application/json' } } }
         : modelConfig.provider === 'openai'

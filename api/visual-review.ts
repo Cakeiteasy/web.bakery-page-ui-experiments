@@ -61,7 +61,7 @@ export default async function handler(req: any, res: any): Promise<void> {
           content: `Here is the full HTML of the landing page:\n\n${html.slice(0, 60_000)}`
         }
       ],
-      temperature: 0.3
+      temperature: 0.9
     });
 
     res.status(200).json({ review: result.text });
