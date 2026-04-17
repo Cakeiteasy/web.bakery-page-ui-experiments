@@ -65,6 +65,14 @@ export interface BwaiAiLog {
   llmTimeMs?: number | null;
   totalTimeMs?: number | null;
   warnings?: string[];
+  /** Full system string sent to the LLM (detail fetch only). */
+  systemPrompt?: string | null;
+  /** Pretty-printed JSON of messages passed to the LLM (detail fetch only). */
+  llmRequestMessagesJson?: string | null;
+  /** Set when serialization failed or payload exceeded storage limits. */
+  llmRequestMessagesError?: string | null;
+  /** Raw streamed model text before parsing (detail fetch only). */
+  rawModelOutput?: string | null;
   createdAt: number;
 }
 
