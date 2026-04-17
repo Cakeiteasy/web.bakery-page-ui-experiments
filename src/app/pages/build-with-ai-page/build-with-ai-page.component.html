@@ -344,7 +344,7 @@
                 <span class="message__target-value">{{ message.target.label }}</span>
                 <span class="message__target-ref" *ngIf="message.target.reference">{{ message.target.reference }}</span>
               </p>
-              <p class="message__text">{{ message.text }}</p>
+              <p class="message__text">{{ message.displayText ?? message.text }}</p>
               <p class="message__capture-warning" *ngIf="message.role === 'user' && message.sectionCaptureWarning">
                 {{ message.sectionCaptureWarning }}
               </p>

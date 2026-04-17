@@ -77,6 +77,45 @@ export const BUILD_WITH_AI_MODELS: BuildWithAiModelOption[] = [
 
 export const BUILD_WITH_AI_CONTEXT_WARNING_RATIO = 0.8;
 
+export const INITIAL_PAGE_GUIDELINES = `
+If you add any of the sections below, use these guidelines:
+- Hero section. Bold, creative, and engaging. Use complex creative radial gradient background and partially colored title unless asked otherwise.
+- Feature card grid. Use subtle shadows and muted backgrounds.
+- Metrics/stats row. Use large numbers with text-4xl font-bold.
+- FAQ accordion. Use space-y-4 and border rounded-lg.
+- Testimonial cards. Use grid or flex layout, avatar + quote + attribution. For avatars, use a placeholder image.
+- CTA banner. Use bg-[var(--lp-primary)] text-white py-16 text-center with prominent button.
+- Contact form. Use max-w-lg mx-auto, styled inputs with rounded-lg border focus:ring-2.
+- Products List section using data-cie-component="products-list" contract.
+
+Molecules:
+- Cta button: inline-block px-8 py-3 bg-[var(--lp-primary)] text-white rounded-lg font-semibold hover:opacity-90 transition-opacity
+- Accordion: space-y-4, border rounded-lg, toggle via content.js.
+- Card: no shadows.
+
+Design principles:
+- Be creative and tasteful. Use gradient backgrounds, partially colored titles, subtle animations, dark sections, etc. Don't overdo it. Don't do it if the user explicitly asks for a specific design.
+- Don't make the page look too techy unless user explicitly asks for it. The point of the page is to sell a product or service — it should feel warm, inviting, and premium.
+- Give the page generous whitespace. Sections need breathing room — don't cram content. err on the side of more padding, not less.
+- Create visual rhythm between sections. Alternate between light backgrounds, dark/colored backgrounds, and image-heavy sections so the page has flow and contrast. Not every section should be white-on-white.
+- Establish clear typography hierarchy. Headings should feel large and intentional. Body text should be comfortable to read. Don't let sizes blur together.
+- Cards should be subtle by modern standards — soft shadows and muted backgrounds, not bright colored boxes. Unless user explicitly asks otherwise.
+- Use images where they add emotional value (hero backgrounds, product showcases, lifestyle shots). Don't add them just to fill space.
+- Be consistent — spacing scale, border-radius, color palette, and typography should feel unified across all sections.
+
+Common mistakes to avoid:
+- Buttons must always have whitespace-nowrap, otherwise they break across lines.
+- Buttons and interactive elements must always have cursor: pointer.
+- All text must be readable. When placing text over images, always add a dark overlay or text shadow for contrast.
+- When choosing placeholder images, be specific and evocative — not generic stock-photo keywords.
+- Don't over-decorate. If a section already has a gradient background, it probably doesn't also need drop shadows on every card, colored borders, and animated icons.
+- Make sure everything looks good on all screen sizes. On small, medium, and large screens.
+- Images can have any size or aspect ratio. Make sure any image is displayed in a way that looks good.
+- Make sure that in the hero section, left and right parts (or top and bottom on smaller screens) always have enough space between them and don't stick together.
+- Make sure bullet list decorators are always good. They are often misaligned and/or sqeezed. Avoid that.
+- Note: --lp-gold has hard-coded value of #c89b5a. Use accordingly.
+`;
+
 export const BUILD_WITH_AI_COMPONENT_LIBRARY_PROMPT = `
 Component and style library guidance (hidden from user UI):
 - Brand palette anchors via CSS vars: var(--lp-primary) #FF3399, var(--lp-cream) #F9F9F9, var(--lp-warm) #F7F3F0, var(--lp-dark) #333333, var(--lp-muted) #858585, var(--lp-border) #EBEBEB, var(--lp-white) #FFFFFF.

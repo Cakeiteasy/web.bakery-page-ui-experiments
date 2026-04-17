@@ -44,7 +44,8 @@ import {
   BUILD_WITH_AI_STATIC_SHELL_CSS,
   BUILD_WITH_AI_THEME_FONT_HREF_RESOLVER,
   BUILD_WITH_AI_THEME_STYLE_BUILDER,
-  BUILD_WITH_AI_STORAGE_KEY
+  BUILD_WITH_AI_STORAGE_KEY,
+  INITIAL_PAGE_GUIDELINES
 } from './build-with-ai.constants';
 import { BwaiSeoModalComponent, BwaiSeoFormValue } from './bwai-seo-modal/bwai-seo-modal.component';
 import { BwaiNewPageDialogComponent, NewPageResult } from './bwai-new-page-dialog/bwai-new-page-dialog.component';
@@ -195,6 +196,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   readonly loading = signal<boolean>(true);
   readonly processing = signal<boolean>(false);
   readonly draftMessage = signal<string>('');
+  readonly draftDisplayText = signal<string>('');
   readonly files = signal<BuildWithAiEditableFiles>({ html: '', css: '', js: '' });
   readonly messages = signal<BuildWithAiChatMessage[]>([]);
   readonly patchLogs = signal<BuildWithAiPatchLogEntry[]>([]);
@@ -811,8 +813,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       // For AI mode: auto-send description as first message
       if (result.mode === 'ai' && result.description) {
         await new Promise<void>((res) => setTimeout(res, 800)); // brief delay for navigation/load
+        this.draftDisplayText.set(
+          `Build a complete landing page based on this instruction: ${result.description}`
+        );
         this.draftMessage.set(
-          `Build a complete landing page based on this instruction: ${result.description}. The lp- design system is already in the shell styles (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Keep content.css additive for custom page styling. Do NOT add header, nav, or footer — they are already in the shell.`
+          `Build a complete landing page based on this instruction: ${result.description}\n\n${INITIAL_PAGE_GUIDELINES}\n\nThe lp- design system is already in the shell styles (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Keep content.css additive for custom page styling. Do NOT add header, nav, or footer — they are already in the shell.`
         );
         void this.onSend();
       }
@@ -1574,10 +1579,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       }
     }
 
+    const draftDisplay = this.draftDisplayText().trim();
     const userMessage: BuildWithAiChatMessage = {
       id: this.createId('user'),
       role: 'user',
       text: this.draftMessage().trim(),
+      ...(draftDisplay ? { displayText: draftDisplay } : {}),
       createdAt: Date.now(),
       attachments,
       ...(selectedTarget ? { target: this.toMessageTarget(selectedTarget) } : {}),
@@ -1586,6 +1593,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     this.messages.update((messages) => [...messages, userMessage]);
     this.draftMessage.set('');
+    this.draftDisplayText.set('');
     this.pendingAttachments.set([]);
     this.resetTextareaHeight();
 

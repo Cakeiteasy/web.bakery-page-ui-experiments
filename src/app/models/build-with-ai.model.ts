@@ -40,6 +40,7 @@ export interface BuildWithAiChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  displayText?: string;
   createdAt: number;
   attachments: BuildWithAiAttachment[];
   target?: BuildWithAiMessageTarget;
