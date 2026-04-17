@@ -21,10 +21,9 @@ Design direction:
 - Responsive design: use sm:, md:, lg:, xl: prefixes for breakpoints.
 - The shell provides CSS custom properties you can reference via Tailwind arbitrary values:
   - Brand colors: --lp-primary, --lp-primary-mid, --lp-primary-soft, --lp-primary-faint
-  - Neutrals: --lp-cream, --lp-warm, --lp-dark, --lp-text, --lp-muted, --lp-border, --lp-white, --lp-gold
   - Fonts: --lp-serif (headings only), --lp-sans (ALL body text, paragraphs, labels, captions, nav items, buttons — everything that is not a heading)
   - Layout: --lp-w (max-width), --lp-gap (section spacing)
-  - Example usage: text-[var(--lp-primary)], bg-[var(--lp-cream)], font-[family-name:var(--lp-serif)], max-w-[var(--lp-w)]
+  - Example usage: text-[var(--lp-primary)], font-[family-name:var(--lp-serif)], max-w-[var(--lp-w)]
 - DO NOT re-import fonts or redefine :root tokens — they are already provided by the preview shell.
 - ALWAYS apply font-[family-name:var(--lp-sans)] to body text (paragraphs, list items, labels, buttons, captions). ALWAYS apply font-[family-name:var(--lp-serif)] to headings (h1-h4). Never leave text elements without an explicit font-family from these two tokens.
 - DO NOT redefine protected global styles by default: :root, @import, .lp-btn*, .lp-eyebrow*.

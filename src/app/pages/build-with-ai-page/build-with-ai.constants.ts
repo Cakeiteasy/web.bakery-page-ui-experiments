@@ -79,18 +79,18 @@ export const BUILD_WITH_AI_CONTEXT_WARNING_RATIO = 0.8;
 
 export const INITIAL_PAGE_GUIDELINES = `
 If you add any of the sections below, use these guidelines:
-- Hero section. Bold, creative, and engaging. Use complex creative radial gradient background and partially colored title unless asked otherwise.
-- Feature card grid. Use subtle shadows and muted backgrounds.
-- Metrics/stats row. Use large numbers with text-4xl font-bold.
-- FAQ accordion. Use space-y-4 and border rounded-lg.
-- Testimonial cards. Use grid or flex layout, avatar + quote + attribution. For avatars, use a placeholder image.
-- CTA banner. Use bg-[var(--lp-primary)] text-white py-16 text-center with prominent button.
-- Contact form. Use max-w-lg mx-auto, styled inputs with rounded-lg border focus:ring-2.
-- Products List section using data-cie-component="products-list" contract.
+- Hero section. Bold, creative, and engaging. Use complex creative beautiful gradient background and partially colored title unless asked otherwise.
+- Feature card grid.
+- Metrics/stats row.
+- FAQ accordion.
+- Testimonial cards. For avatars, use a placeholder images.
+- CTA banner.
+- Contact form.
+- Products List section using data-cie-component="products-list" contract. DO NOT STYLE THIS SECTION. IT IS STYLED BY THE RUNTIME.
+Each section should be unique and stand out. Be creative with your designs.
 
 Molecules:
-- Cta button: inline-block px-8 py-3 bg-[var(--lp-primary)] text-white rounded-lg font-semibold hover:opacity-90 transition-opacity
-- Accordion: space-y-4, border rounded-lg, toggle via content.js.
+- Cta button: inline-block px-8 py-3 bg-[var(--lp-primary)] text-white rounded-full font-semibold hover:opacity-90 transition-opacity
 - Card: no shadows.
 
 Design principles:
@@ -113,12 +113,10 @@ Common mistakes to avoid:
 - Images can have any size or aspect ratio. Make sure any image is displayed in a way that looks good.
 - Make sure that in the hero section, left and right parts (or top and bottom on smaller screens) always have enough space between them and don't stick together.
 - Make sure bullet list decorators are always good. They are often misaligned and/or sqeezed. Avoid that.
-- Note: --lp-gold has hard-coded value of #c89b5a. Use accordingly.
 `;
 
 export const BUILD_WITH_AI_COMPONENT_LIBRARY_PROMPT = `
 Component and style library guidance (hidden from user UI):
-- Brand palette anchors via CSS vars: var(--lp-primary) #FF3399, var(--lp-cream) #F9F9F9, var(--lp-warm) #F7F3F0, var(--lp-dark) #333333, var(--lp-muted) #858585, var(--lp-border) #EBEBEB, var(--lp-white) #FFFFFF.
 - Typography: use font-[family-name:var(--lp-serif)] for headings, font-[family-name:var(--lp-sans)] for body.
 - Use Tailwind CSS utility classes for all styling. Build components with utilities, not custom CSS classes.
 - Reusable component patterns (all Tailwind-based):
