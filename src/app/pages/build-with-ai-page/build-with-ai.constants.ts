@@ -79,7 +79,7 @@ export const BUILD_WITH_AI_CONTEXT_WARNING_RATIO = 0.8;
 
 export const INITIAL_PAGE_GUIDELINES = `
 If you add any of the sections below, use these guidelines:
-- Hero section. Bold, creative, and engaging. Use complex creative beautiful gradient background and partially colored title unless asked otherwise.
+- Hero section. Bold, creative, and engaging. Use gradient background and partially colored title unless asked otherwise.
 - Feature card grid.
 - Metrics/stats row.
 - FAQ accordion.
@@ -102,6 +102,7 @@ Design principles:
 - Cards should be subtle by modern standards — soft shadows and muted backgrounds, not bright colored boxes. Unless user explicitly asks otherwise.
 - Use images where they add emotional value (hero backgrounds, product showcases, lifestyle shots). Don't add them just to fill space.
 - Be consistent — spacing scale, border-radius, color palette, and typography should feel unified across all sections.
+- For gradients, make sure to use only primary color with something neutral.
 
 Common mistakes to avoid:
 - Buttons must always have whitespace-nowrap, otherwise they break across lines.
