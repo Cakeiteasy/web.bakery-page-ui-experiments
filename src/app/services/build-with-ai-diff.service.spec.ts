@@ -277,4 +277,116 @@ describe('BuildWithAiDiffService', () => {
     expect(result.ok).toBeTrue();
     expect(result.files.css).toBe('.lp-hero { padding: 20px; }');
   });
+
+  // --- Replace mode: CRLF normalization fallback ---
+
+  it('replace tolerates CRLF/LF mismatch in search string', () => {
+    const result = service.applyEdits(
+      { html: '<div>\r\n  <h1>Title</h1>\r\n</div>', css: '', js: '' },
+      [{
+        file: 'content.html',
+        search: '<div>\n  <h1>Title</h1>\n</div>',
+        value: '<div>\n  <h1>New Title</h1>\n</div>'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.editResults[0].status).toBe('matched');
+    expect(result.files.html).toBe('<div>\n  <h1>New Title</h1>\n</div>');
+  });
+
+  // --- Replace mode: collapsed-whitespace normalization fallback ---
+
+  it('replace tolerates indentation drift between search and file', () => {
+    const result = service.applyEdits(
+      { html: '<section>\n    <h2>Title</h2>\n    <p>Text</p>\n</section>', css: '', js: '' },
+      [{
+        file: 'content.html',
+        search: '<section>\n  <h2>Title</h2>\n  <p>Text</p>\n</section>',
+        value: '<section>\n  <h2>Updated</h2>\n</section>'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.editResults[0].status).toBe('matched');
+    expect(result.files.html).toBe('<section>\n  <h2>Updated</h2>\n</section>');
+  });
+
+  it('replace tolerates extra whitespace between tags', () => {
+    const result = service.applyEdits(
+      { html: '<div>  <span>A</span>  <span>B</span>  </div>', css: '', js: '' },
+      [{
+        file: 'content.html',
+        search: '<div> <span>A</span> <span>B</span> </div>',
+        value: '<div><span>X</span></div>'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.files.html).toBe('<div><span>X</span></div>');
+  });
+
+  it('replace does not match when non-whitespace characters differ', () => {
+    const result = service.applyEdits(
+      { html: '<h1>Hello</h1>', css: '', js: '' },
+      [{ file: 'content.html', search: '<h1>Goodbye</h1>', value: '<h1>Hi</h1>' }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.editResults[0].status).toBe('unmatched');
+  });
+
+  // --- insertAfter: collapsed-whitespace normalization fallback ---
+
+  it('insertAfter tolerates indentation drift in anchor', () => {
+    const result = service.applyEdits(
+      { html: '<ul>\n    <li>One</li>\n</ul>', css: '', js: '' },
+      [{
+        file: 'content.html',
+        mode: 'insertAfter',
+        search: '<ul>\n  <li>One</li>\n</ul>',
+        value: '\n<p>After</p>'
+      }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.editResults[0].status).toBe('matched');
+    expect(result.files.html).toContain('</ul>\n<p>After</p>');
+  });
+
+  // --- partialOk flag ---
+
+  it('sets partialOk when some edits match and some do not', () => {
+    const result = service.applyEdits(
+      { html: '<h1>Hello</h1><p>World</p>', css: '', js: '' },
+      [
+        { file: 'content.html', search: 'not-found', value: 'x' },
+        { file: 'content.html', search: 'World', value: 'Earth' }
+      ]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.partialOk).toBeTrue();
+    expect(result.files.html).toBe('<h1>Hello</h1><p>Earth</p>');
+  });
+
+  it('partialOk is false when all edits match', () => {
+    const result = service.applyEdits(
+      { html: '<h1>Hello</h1>', css: '', js: '' },
+      [{ file: 'content.html', search: 'Hello', value: 'Hi' }]
+    );
+
+    expect(result.ok).toBeTrue();
+    expect(result.partialOk).toBeFalse();
+  });
+
+  it('partialOk is false when no edits match', () => {
+    const result = service.applyEdits(
+      { html: '<h1>Hello</h1>', css: '', js: '' },
+      [{ file: 'content.html', search: 'missing', value: 'x' }]
+    );
+
+    expect(result.ok).toBeFalse();
+    expect(result.partialOk).toBeFalse();
+  });
 });

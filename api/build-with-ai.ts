@@ -1,4 +1,4 @@
-import { streamText } from 'ai';
+import { streamText, type ModelMessage } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import sharp from 'sharp';
@@ -6,6 +6,7 @@ import { ObjectId } from 'mongodb';
 
 import { COMPONENT_LIBRARY_PROMPT, SYSTEM_PROMPT } from './build-with-ai.prompt.js';
 import clientPromise, { dbName } from '../lib/mongodb.js';
+import { stripTailwindFromCss } from '../lib/tailwind-markers.js';
 
 interface IncomingAttachment {
   id: string;
@@ -90,6 +91,45 @@ interface LoggedFileHashes {
   js: string;
 }
 
+/** BSON document safe limit — leave headroom below MongoDB's 16MB cap. */
+const LLM_MESSAGES_JSON_MAX_CHARS = 15_000_000;
+
+function jsonReplacerForLlmLog(_key: string, value: unknown): unknown {
+  if (value instanceof Uint8Array) {
+    return { __encoded: 'base64', data: Buffer.from(value).toString('base64') };
+  }
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) {
+    return { __encoded: 'base64', data: value.toString('base64') };
+  }
+  if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+    const view = value as ArrayBufferView;
+    return {
+      __encoded: 'base64',
+      data: Buffer.from(view.buffer, view.byteOffset, view.byteLength).toString('base64')
+    };
+  }
+  return value;
+}
+
+function buildLlmRequestMessagesJson(messages: Array<{ role: string; content: unknown }>): {
+  json: string | null;
+  error: string | null;
+} {
+  try {
+    const json = JSON.stringify(messages, jsonReplacerForLlmLog, 2);
+    if (json.length > LLM_MESSAGES_JSON_MAX_CHARS) {
+      return {
+        json: null,
+        error: `Serialized LLM messages too large for log storage (${json.length} chars, max ${LLM_MESSAGES_JSON_MAX_CHARS}).`
+      };
+    }
+    return { json, error: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to serialize LLM messages.';
+    return { json: null, error: message };
+  }
+}
+
 const MODEL_REGISTRY: Record<string, { provider: 'openai' | 'google'; modelId: string; reasoningModel?: boolean }> = {
   'openai:gpt-5.1': {
     provider: 'openai',
@@ -134,7 +174,7 @@ export default async function handler(req: any, res: any): Promise<void> {
       '--- content.html ---',
       payload.files.html,
       '--- content.css ---',
-      payload.files.css,
+      stripTailwindFromCss(payload.files.css),
       '--- content.js ---',
       payload.files.js
     ].join('\n');
@@ -153,7 +193,7 @@ export default async function handler(req: any, res: any): Promise<void> {
 
     const styleOverrideInstruction = payload.allowGlobalStyleOverride
       ? 'This request explicitly allows global style overrides via [ALLOW_STYLE_OVERRIDE]. Protected global styles may be modified if necessary.'
-      : 'This request does not allow global style overrides. Do not modify protected global styles in content.css (:root, @import, .lp-btn*, .lp-eyebrow*).';
+      : 'This request does not allow global style overrides. Do not modify protected global styles in content.css (:root, @import, .lp-btn*, .lp-eyebrow*). Use Tailwind CSS utility classes in content.html for all styling.';
     systemPrompt = `${styleOverrideInstruction}\n${systemPrompt}`;
 
     const promptChars = systemPrompt.length + messages.reduce((n, m) => n + JSON.stringify(m.content).length, 0);
@@ -168,6 +208,7 @@ export default async function handler(req: any, res: any): Promise<void> {
     const mongoClient = await clientPromise;
     const db = mongoClient.db(dbName);
     const logsCol = db.collection('bwai_ai_logs');
+    const { json: llmRequestMessagesJson, error: llmRequestMessagesError } = buildLlmRequestMessagesJson(messages);
     await logsCol.insertOne({
       _id: logDocId,
       pageId: payload.pageId ? (() => { try { return new ObjectId(payload.pageId); } catch { return null; } })() : null,
@@ -191,6 +232,10 @@ export default async function handler(req: any, res: any): Promise<void> {
       llmTimeMs: null,
       totalTimeMs: null,
       warnings: [],
+      systemPrompt,
+      llmRequestMessagesJson,
+      llmRequestMessagesError,
+      rawModelOutput: null,
       createdAt: new Date()
     });
     const logId = String(logDocId);
@@ -205,8 +250,8 @@ export default async function handler(req: any, res: any): Promise<void> {
     const stream = streamText({
       model,
       system: systemPrompt,
-      messages,
-      ...(modelConfig.reasoningModel ? {} : { temperature: 0.2 }),
+      messages: messages as ModelMessage[],
+      ...(modelConfig.reasoningModel ? {} : { temperature: 0.9 }),
       providerOptions: modelConfig.provider === 'google'
         ? { google: { generationConfig: { responseMimeType: 'application/json' } } }
         : modelConfig.provider === 'openai'
@@ -236,7 +281,13 @@ export default async function handler(req: any, res: any): Promise<void> {
     }
 
     // Update log with token/timing + parsed response
-    const logSet: Record<string, unknown> = { inputTokens, outputTokens, llmTimeMs, totalTimeMs };
+    const logSet: Record<string, unknown> = {
+      inputTokens,
+      outputTokens,
+      llmTimeMs,
+      totalTimeMs,
+      rawModelOutput: rawModelText
+    };
     if (parsedPayload) {
       logSet['assistantText'] = parsedPayload.assistantText;
       logSet['edits'] = parsedPayload.edits;

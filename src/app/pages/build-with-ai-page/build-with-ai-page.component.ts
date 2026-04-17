@@ -32,6 +32,7 @@ import { BuildWithAiContextMeterService } from '../../services/build-with-ai-con
 import { BuildWithAiDiffService } from '../../services/build-with-ai-diff.service';
 import { BuildWithAiSessionService } from '../../services/build-with-ai-session.service';
 import { BuildWithAiSyntaxValidatorService } from '../../services/build-with-ai-syntax-validator.service';
+import { BuildWithAiUnsplashService } from '../../services/build-with-ai-unsplash.service';
 import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
 import { BwaiPageService } from '../../services/bwai-page.service';
 import {
@@ -43,7 +44,8 @@ import {
   BUILD_WITH_AI_STATIC_SHELL_CSS,
   BUILD_WITH_AI_THEME_FONT_HREF_RESOLVER,
   BUILD_WITH_AI_THEME_STYLE_BUILDER,
-  BUILD_WITH_AI_STORAGE_KEY
+  BUILD_WITH_AI_STORAGE_KEY,
+  INITIAL_PAGE_GUIDELINES
 } from './build-with-ai.constants';
 import { BwaiSeoModalComponent, BwaiSeoFormValue } from './bwai-seo-modal/bwai-seo-modal.component';
 import { BwaiNewPageDialogComponent, NewPageResult } from './bwai-new-page-dialog/bwai-new-page-dialog.component';
@@ -57,6 +59,7 @@ import {
   BwaiImagePickerModalComponent,
   UnsplashPickerSelection
 } from './bwai-image-picker-modal/bwai-image-picker-modal.component';
+import { stripTailwindFromCss } from '../../../../lib/tailwind-markers';
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'build-with-ai-sidebar-width';
 const SIDEBAR_WIDTH_DEFAULT = 360;
@@ -69,6 +72,8 @@ const SECTION_CAPTURE_PREPARE_DEBOUNCE_MS = 180;
 const SECTION_CAPTURE_WAIT_ON_SEND_MS = 1_500;
 const SECTION_CAPTURE_MAX_UPLOAD_WIDTH_PX = 1440;
 const SECTION_CAPTURE_JPEG_AREA_THRESHOLD = 2_200_000;
+// Set to true to skip screenshot capture during AI calls (temporary, for testing)
+const DISABLE_SECTION_CAPTURE = true;
 const STYLE_EDITOR_DEFAULT_TEXT_COLOR = '#2a2018';
 const STYLE_EDITOR_DEFAULT_BG_COLOR = '#ffffff';
 const STYLE_EDITOR_DEFAULT_DRAFT: BwaiStyleDraft = {
@@ -127,6 +132,7 @@ interface BwaiSectionCapturePendingRequest {
   resolve: (result: BwaiSectionCaptureResult) => void;
   reject: (error: Error) => void;
   timeoutId: ReturnType<typeof setTimeout>;
+  section?: SelectedSection | null;
 }
 
 interface BwaiStyleEditorTarget {
@@ -178,6 +184,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   private readonly diffService = inject(BuildWithAiDiffService);
   private readonly sessionService = inject(BuildWithAiSessionService);
   private readonly syntaxValidator = inject(BuildWithAiSyntaxValidatorService);
+  private readonly unsplashService = inject(BuildWithAiUnsplashService);
   private readonly domSanitizer = inject(DomSanitizer);
   private readonly bwaiPageService = inject(BwaiPageService);
   private readonly aiLogService = inject(BwaiAiLogService);
@@ -189,6 +196,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
   readonly loading = signal<boolean>(true);
   readonly processing = signal<boolean>(false);
   readonly draftMessage = signal<string>('');
+  readonly draftDisplayText = signal<string>('');
   readonly files = signal<BuildWithAiEditableFiles>({ html: '', css: '', js: '' });
   readonly messages = signal<BuildWithAiChatMessage[]>([]);
   readonly patchLogs = signal<BuildWithAiPatchLogEntry[]>([]);
@@ -470,6 +478,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           width: Number(payload.width ?? 0),
           height: Number(payload.height ?? 0)
         });
+        // this.downloadCapture(payload.dataUrl, pending.section);
       } else {
         pending.reject(
           this.createSectionCaptureError(
@@ -603,9 +612,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.pages.set(allPages);
 
       const rawFiles = page.currentFiles ?? { html: '', css: '', js: '' };
+      const strippedCss = stripTailwindFromCss(rawFiles.css);
       const normalized = this.normalizeHtml(rawFiles.html);
       const { html: htmlWithIds, changed: idsAdded } = this.ensureSectionIds(normalized);
-      const files = { ...rawFiles, html: htmlWithIds };
+      const files = { ...rawFiles, css: strippedCss, html: htmlWithIds };
       this.files.set(files);
       this.markSectionCaptureContentChanged('page-loaded');
       if (idsAdded) {
@@ -803,8 +813,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       // For AI mode: auto-send description as first message
       if (result.mode === 'ai' && result.description) {
         await new Promise<void>((res) => setTimeout(res, 800)); // brief delay for navigation/load
+        this.draftDisplayText.set(
+          `Build a complete landing page based on this instruction: ${result.description}`
+        );
         this.draftMessage.set(
-          `Build a complete landing page for: ${result.description}. The lp- design system is already in the shell styles (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Keep content.css additive for custom page styling. Do NOT add header, nav, or footer — they are already in the shell.`
+          `Build a complete landing page based on this instruction: ${result.description}\n\n${INITIAL_PAGE_GUIDELINES}\n\nThe lp- design system is already in the shell styles (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Keep content.css additive for custom page styling. Do NOT add header, nav, or footer — they are already in the shell.`
         );
         void this.onSend();
       }
@@ -840,7 +853,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     try {
       const restoredFiles = await this.bwaiPageService.restoreVersionAsync(page.id, version.id);
       const { html: restoredHtmlWithIds } = this.ensureSectionIds(this.normalizeHtml(restoredFiles.html));
-      const files = { ...restoredFiles, html: restoredHtmlWithIds };
+      const files = { ...restoredFiles, css: stripTailwindFromCss(restoredFiles.css), html: restoredHtmlWithIds };
       this.files.set(files);
       this.markSectionCaptureContentChanged('version-restored');
       this.currentPage.update((p) => p ? { ...p, currentFiles: files } : p);
@@ -1522,21 +1535,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     let prompt = `Insert a "${type}" section${afterText}. Match the existing lp- CSS class naming convention, primary accent (--lp-primary), and design tokens.`;
 
-    if (type === 'Products List (Request)') {
+    if (type === 'Products List') {
       prompt = [
-        `Insert a "Products List (Request)" section${afterText}.`,
+        `Insert a "Products List" section${afterText}.`,
         'Use a contract-based section root exactly like this:',
-        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="request" data-cie-ref-type="city" data-cie-country="NO" data-cie-lang="no" data-cie-show-search="true" data-cie-predefined-category="" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any"><div data-cie-products-list-mount></div></section>',
-        'Do not write custom API fetching code in content.js for this section. The runtime handles requests and sends x-source-header=MARKETPLACE.',
-        'Use data-cie-limit only when the user explicitly asks to cap product count; otherwise omit it for unlimited results.'
-      ].join('\n');
-    } else if (type === 'Products List (Preset)') {
-      prompt = [
-        `Insert a "Products List (Preset)" section${afterText}.`,
-        'Use a contract-based section root exactly like this:',
-        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="preset" data-cie-ref-type="bakery" data-cie-ref-name="rosenborg-bakeri" data-cie-category-id="1" data-cie-show-search="false" data-cie-predefined-category="" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any" data-cie-country="NO" data-cie-lang="no"><div data-cie-products-list-mount></div></section>',
-        'Keep optional filter attributes even when empty. Do not add custom fetch logic in content.js for this section.',
-        'data-cie-category-id is optional only when data-cie-predefined-category is provided.'
+        '<section class="lp-products-list" data-cie-component="products-list" data-cie-country="NO" data-cie-lang="no" data-cie-show-search="true"><div data-cie-products-list-mount></div></section>',
+        'Do not write custom API fetching code in content.js for this section. The runtime handles everything automatically.'
       ].join('\n');
     }
 
@@ -1564,9 +1568,10 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     let sectionCaptureWarning: string | undefined;
     this.activeError.set(null);
 
-    if (selectedTarget) {
+    if (selectedTarget && !DISABLE_SECTION_CAPTURE) {
       const sectionCapture = await this.captureSelectedSectionAttachment(selectedTarget);
       if (sectionCapture.attachment) {
+        console.log('sectionCapture.attachment: ', sectionCapture.attachment);
         attachments = [...manualAttachments, sectionCapture.attachment];
       }
       if (sectionCapture.warning) {
@@ -1574,10 +1579,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       }
     }
 
+    const draftDisplay = this.draftDisplayText().trim();
     const userMessage: BuildWithAiChatMessage = {
       id: this.createId('user'),
       role: 'user',
       text: this.draftMessage().trim(),
+      ...(draftDisplay ? { displayText: draftDisplay } : {}),
       createdAt: Date.now(),
       attachments,
       ...(selectedTarget ? { target: this.toMessageTarget(selectedTarget) } : {}),
@@ -1586,6 +1593,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     this.messages.update((messages) => [...messages, userMessage]);
     this.draftMessage.set('');
+    this.draftDisplayText.set('');
     this.pendingAttachments.set([]);
     this.resetTextareaHeight();
 
@@ -1700,8 +1708,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     };
   }
 
-  private async generateAndApplyPatch(): Promise<void> {
-    this.processing.set(true);
+  private async generateAndApplyPatch(retryAttempt = 0): Promise<void> {
+    const isTopLevel = retryAttempt === 0;
+    if (isTopLevel) {
+      this.processing.set(true);
+    }
     let lastRawDiff: string | null = null;
     let logId: string | undefined;
     let lastEdits: BuildWithAiSearchReplaceEdit[] = [];
@@ -1736,26 +1747,29 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       );
 
       logId = response.logId;
-      lastEdits = response.edits;
       lastWarnings = response.warnings ?? [];
 
       if (!response.edits?.length) {
         throw new Error('AI response did not include any edits.');
       }
 
-      lastRawDiff = JSON.stringify(response.edits);
-      const diffResult = this.diffService.applyEdits(beforeFiles, response.edits, {
+      const enrichedEdits = await this.unsplashService.replacePlaceholders(response.edits);
+      lastEdits = enrichedEdits;
+
+      lastRawDiff = JSON.stringify(enrichedEdits);
+      const diffResult = this.diffService.applyEdits(beforeFiles, enrichedEdits, {
         allowGlobalStyleOverride
       });
       lastApplyResults = diffResult.editResults;
       lastTouchedFiles = [...diffResult.touchedFiles];
 
-      // Check for unmatched edits before syntax validation
-      if (!diffResult.ok) {
-        const unmatchedDetails = diffResult.editResults
-          .filter(r => r.status !== 'matched')
-          .map(r => `${r.file}: ${r.error ?? r.status}`)
-          .join(' | ');
+      const unmatchedEdits = diffResult.editResults.filter(r => r.status !== 'matched');
+      const unmatchedDetails = unmatchedEdits
+        .map(r => `${r.file}: ${r.error ?? r.status}`)
+        .join(' | ');
+
+      // Full rejection: zero edits matched
+      if (!diffResult.ok && !diffResult.partialOk) {
         const hasStyleOverrideHint = unmatchedDetails.includes('[ALLOW_STYLE_OVERRIDE]');
         const assistantRejectionText = [
           response.assistantText || 'Patch could not be applied — some edits did not match the current file content.',
@@ -1793,6 +1807,11 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         void this.persistToMongo({ messages: this.messages(), patchLogs: this.patchLogs() });
         if (page) {
           void this.bwaiPageService.saveVersionAsync(page.id, { files: this.files(), diff: JSON.stringify(response.edits), status: 'rejected' });
+        }
+
+        if (retryAttempt === 0 && this.hasRetryableUnmatched(diffResult.editResults)) {
+          this.injectRetryCorrection(diffResult.editResults);
+          await this.generateAndApplyPatch(1);
         }
         return;
       }
@@ -1835,18 +1854,24 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         return;
       }
 
+      const isPartial = diffResult.partialOk;
+      const applyStatus: 'applied' | 'partial' = isPartial ? 'partial' : 'applied';
+
       const patchedHtml = this.normalizeHtml(diffResult.files.html);
       const { html: patchedHtmlWithIds } = this.ensureSectionIds(patchedHtml);
       const nextFiles = { ...diffResult.files, html: patchedHtmlWithIds };
       this.files.set(nextFiles);
       this.markSectionCaptureContentChanged('patch-applied');
-      this.pushPatchLog(JSON.stringify(response.edits), 'applied', `Touched ${diffResult.touchedFiles.join(', ')}`);
+      this.pushPatchLog(JSON.stringify(response.edits), applyStatus, isPartial
+        ? `Partial apply (${unmatchedEdits.length} skipped): ${unmatchedDetails}`
+        : `Touched ${diffResult.touchedFiles.join(', ')}`);
 
       if (logId) {
         this.updateLogWithRetry(logId, {
           edits: response.edits,
           applyResults: diffResult.editResults,
-          applyStatus: 'applied',
+          applyStatus,
+          rejectionReason: isPartial ? `Partial — skipped edits: ${unmatchedDetails}` : undefined,
           warnings: response.warnings,
           afterFileHashes: this.buildFileHashes(nextFiles),
           touchedFiles: diffResult.touchedFiles
@@ -1854,12 +1879,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       }
 
       const warningsText = response.warnings.length ? `\n\nWarnings:\n- ${response.warnings.join('\n- ')}` : '';
+      const partialWarning = isPartial
+        ? `\n\nNote: ${unmatchedEdits.length} of ${response.edits.length} edits could not be matched and were skipped.`
+        : '';
       this.messages.update((messages) => [
         ...messages,
         {
           id: this.createId('assistant'),
           role: 'assistant',
-          text: `${response.assistantText}${warningsText}`.trim(),
+          text: `${response.assistantText}${partialWarning}${warningsText}`.trim(),
           createdAt: Date.now(),
           attachments: []
         }
@@ -1869,10 +1897,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       if (page) {
         void Promise.all([
           this.persistToMongo({ currentFiles: nextFiles, messages: this.messages(), patchLogs: this.patchLogs() }),
-          this.bwaiPageService.saveVersionAsync(page.id, { files: nextFiles, diff: JSON.stringify(response.edits), status: 'applied' }).then((v) => {
+          this.bwaiPageService.saveVersionAsync(page.id, { files: nextFiles, diff: JSON.stringify(response.edits), status: applyStatus }).then((v) => {
             this.versions.update((vs) => [v, ...vs]);
           })
         ]);
+      }
+
+      if (isPartial && retryAttempt === 0 && this.hasRetryableUnmatched(diffResult.editResults)) {
+        this.injectRetryCorrection(diffResult.editResults);
+        await this.generateAndApplyPatch(1);
       }
     } catch (error) {
       if (lastRawDiff) {
@@ -1912,7 +1945,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       }
       void this.persistToMongo({ messages: this.messages(), patchLogs: this.patchLogs() });
     } finally {
-      this.processing.set(false);
+      if (isTopLevel) {
+        this.processing.set(false);
+      }
     }
   }
 
@@ -1937,6 +1972,32 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         }
       }
     })();
+  }
+
+  private hasRetryableUnmatched(editResults: { status: string }[]): boolean {
+    return editResults.some(r => r.status === 'unmatched');
+  }
+
+  private injectRetryCorrection(editResults: { file: string; search: string; status: string }[]): void {
+    const failedSummary = editResults
+      .filter(r => r.status === 'unmatched')
+      .map(r => `- File "${r.file}": search string starting with "${r.search.slice(0, 80)}${r.search.length > 80 ? '…' : ''}"`)
+      .join('\n');
+    const correctionText =
+      `[AUTO-RETRY] Some edits failed because their search strings did not match the current file content.\n\n` +
+      `Failed edits:\n${failedSummary}\n\n` +
+      `Please re-read the current file content provided above and produce corrected edits for only the failed items. ` +
+      `Copy the "search" value character-for-character from the current file.`;
+    this.messages.update((msgs) => [
+      ...msgs,
+      {
+        id: this.createId('user'),
+        role: 'user' as const,
+        text: correctionText,
+        createdAt: Date.now(),
+        attachments: []
+      }
+    ]);
   }
 
   private buildFileHashes(files: BuildWithAiEditableFiles): BwaiAiLogFileHashes {
@@ -1978,9 +2039,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     const productsListContext = this.buildProductsListContextSuffix(target.outerHtml);
 
     const contextPrefix =
-      `[Editing section: ${label} (${reference}, position ${safePosition})]\n` +
-      `[Exact selector: ${target.selector}]\n` +
-      `Section HTML:\n${target.outerHtml}${productsListContext}\n\n` +
+      `Edit ONLY this section according to the user request: ${target.selector}\n` +
       `User request: `;
 
     return [
@@ -1998,20 +2057,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       '',
       '',
       '[Products List section context]',
-      '- Use data attributes on the section root (no custom fetching in content.js):',
-      '  - data-cie-component="products-list"',
-      '  - data-cie-mode="request" or "preset"',
-      '  - data-cie-ref-type="city" or "bakery"',
-      '  - data-cie-ref-name OR data-cie-bakery-id',
-      '  - data-cie-category-id (optional when data-cie-predefined-category is set)',
-      '  - optional: data-cie-show-search, data-cie-predefined-category, data-cie-allergen-ids, data-cie-group-ids, data-cie-motive, data-cie-limit, data-cie-country, data-cie-lang',
-      '- Runtime behavior:',
-      '  - data-cie-predefined-category locks category and hides tabs.',
-      '  - Missing predefined-category match shows no products (no hard runtime error).',
-      '  - Omit data-cie-limit for unlimited products; include it only when an explicit cap is needed.',
+      '- Renders a search bar for finding cities or bakeries. Clicking a result opens its page on cakeiteasy.no.',
+      '- Data attributes on the section root (no custom fetching in content.js):',
+      '  - data-cie-component="products-list" (required)',
+      '  - data-cie-show-search="true" (shows search input, defaults to true)',
+      '  - data-cie-country="NO" (country code, defaults to NO)',
+      '  - data-cie-lang="no" (language, defaults to no)',
       '- Runtime layout hooks:',
-      '  - classes: .cie-products-list-shell, .cie-products-list, .cie-products-list__search-area, .cie-products-list__tabs, .cie-products-list__grid, .cie-products-list__card, .cie-products-list__empty, .cie-products-list__status',
-      '  - vars: --ciepl-surface, --ciepl-surface-soft, --ciepl-surface-muted, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint'
+      '  - classes: .cie-products-list-shell, .cie-products-list__search-area, .cie-products-list__input, .cie-products-list__dropdown, .cie-products-list__dropdown-item',
+      '  - vars: --ciepl-surface, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint'
     ].join('\n');
   }
 
@@ -2403,6 +2457,18 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  private downloadCapture(dataUrl: string, section: SelectedSection | null | undefined): void {
+    const slug = (section?.label ?? 'section').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const filename = `screenshot-${slug}-${Date.now()}.png`;
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
   private requestSectionCapture(section: SelectedSection): Promise<BwaiSectionCaptureResult> {
     const win = this.previewIframe?.nativeElement.contentWindow;
     if (!this.iframeReady || !win) {
@@ -2422,7 +2488,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       this.pendingSectionCaptureRequests.set(requestId, {
         resolve,
         reject,
-        timeoutId
+        timeoutId,
+        section
       });
 
       try {
@@ -2561,7 +2628,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     if (haystack.includes('timeout')) return 'timeout';
     if (
       haystack.includes('renderer') ||
-      haystack.includes('html2canvas') ||
+      haystack.includes('htmltoimage') ||
       haystack.includes('not loaded')
     ) {
       return 'renderer-not-loaded';
@@ -2685,8 +2752,9 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Build with AI preview</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link id="BuildWithAiThemeFonts" href="${themeFontHref}" rel="stylesheet" />
-    <style>${BUILD_WITH_AI_STATIC_SHELL_CSS}</style>
+    <style>@layer base { ${BUILD_WITH_AI_STATIC_SHELL_CSS} }</style>
     <style id="BuildWithAiContentStyle">${safeCss}</style>
     <style id="BuildWithAiThemeStyle">${themeCss}</style>${hiddenCss ? `\n    <style id="BuildWithAiHiddenSections">${hiddenCss}</style>` : ''}
   </head>
@@ -2749,7 +2817,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       })();
     </script>
 
-    <script src="/assets/vendor/html2canvas.min.js"></script>
+    <script src="/assets/vendor/html-to-image.js"></script>
     <script>
       /* ---- section toolbar ---- */
       (function () {
@@ -2761,7 +2829,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         var styleEditorState = null;
         var lastStyleTarget = null;
 
-        var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form','Products List (Request)','Products List (Preset)'];
+        var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form','Products List'];
 
         /* ── helpers ── */
         function getCleanOuterHtml(el) {
@@ -3054,12 +3122,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           if (explicit) return truncateText(explicit, 48);
 
           var component = normalizeText(el.getAttribute('data-cie-component')).toLowerCase();
-          if (component === 'products-list') {
-            var mode = normalizeText(el.getAttribute('data-cie-mode')).toLowerCase();
-            if (mode === 'request') return 'Products List (Request)';
-            if (mode === 'preset') return 'Products List (Preset)';
-            return 'Products List';
-          }
+          if (component === 'products-list') return 'Products List';
 
           var semantic = inferSemanticLabel(classes);
           var headingEl = el.querySelector('h1,h2,h3,h4,h5,h6');
@@ -3335,7 +3398,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           if (haystack.indexOf('timeout') !== -1) return 'timeout';
           if (
             haystack.indexOf('renderer') !== -1 ||
-            haystack.indexOf('html2canvas') !== -1 ||
+            haystack.indexOf('htmltoimage') !== -1 ||
             haystack.indexOf('not loaded') !== -1
           ) {
             return 'renderer-not-loaded';
@@ -3376,82 +3439,21 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
             if (!target && request.selector) target = document.querySelector(String(request.selector));
             if (!target) throw createCaptureError('section-not-found', 'Selected section was not found.');
 
-            if (typeof window.html2canvas !== 'function') {
+            if (typeof window.htmlToImage !== 'object' || typeof window.htmlToImage.toPng !== 'function') {
               throw createCaptureError('renderer-not-loaded', 'Capture renderer is not loaded yet.');
             }
 
             var rect = target.getBoundingClientRect();
-            var scrollX = window.scrollX || window.pageXOffset || 0;
-            var scrollY = window.scrollY || window.pageYOffset || 0;
-            var sectionLeft = rect.left + scrollX;
-            var sectionRight = rect.right + scrollX;
-            var sectionTop = rect.top + scrollY;
-            var sectionBottom = rect.bottom + scrollY;
-
-            var docEl = document.documentElement;
-            var body = document.body;
-            var docWidth = Math.max(
-              docEl.scrollWidth,
-              docEl.clientWidth,
-              body ? body.scrollWidth : 0,
-              body ? body.clientWidth : 0,
-              1
-            );
-            var docHeight = Math.max(
-              docEl.scrollHeight,
-              docEl.clientHeight,
-              body ? body.scrollHeight : 0,
-              body ? body.clientHeight : 0,
-              1
-            );
-
-            var root = document.getElementById('EditableContentRoot');
-            var rootRect = root ? root.getBoundingClientRect() : null;
-            var rootLeft = rootRect ? rootRect.left + scrollX : sectionLeft;
-            var rootRight = rootRect ? rootRect.right + scrollX : sectionRight;
-
-            var cropLeft = Math.floor(Math.max(0, Math.max(sectionLeft, rootLeft)));
-            var cropRight = Math.ceil(Math.min(docWidth, Math.min(sectionRight, rootRight)));
-            if (cropRight <= cropLeft) {
-              cropLeft = Math.floor(Math.max(0, sectionLeft));
-              cropRight = Math.ceil(Math.min(docWidth, sectionRight));
-            }
-            if (cropRight <= cropLeft) {
-              cropRight = Math.min(docWidth, cropLeft + Math.max(1, Math.ceil(rect.width)));
-            }
-            var cropWidth = Math.max(1, cropRight - cropLeft);
-
-            var padTop = Math.max(0, Math.floor(Number(request.paddingTop) || 0));
-            var padBottom = Math.max(0, Math.floor(Number(request.paddingBottom) || 0));
-            var cropTop = Math.max(0, Math.floor(sectionTop - padTop));
-            var cropBottom = Math.min(docHeight, Math.ceil(sectionBottom + padBottom));
-            if (cropBottom <= cropTop) {
-              cropBottom = Math.min(docHeight, cropTop + Math.max(1, Math.ceil(rect.height)));
-            }
-            var cropHeight = Math.max(1, cropBottom - cropTop);
+            var captureWidth = Math.max(1, Math.ceil(rect.width));
+            var captureHeight = Math.max(1, Math.ceil(rect.height));
 
             document.documentElement.classList.add('bwai-capturing');
             try {
-              var canvas = await window.html2canvas(document.body, {
+              var dataUrl = await window.htmlToImage.toPng(target, {
                 backgroundColor: '#ffffff',
-                useCORS: true,
-                logging: false,
-                x: cropLeft,
-                y: cropTop,
-                width: cropWidth,
-                height: cropHeight,
-                scrollX: 0,
-                scrollY: 0,
-                windowWidth: docWidth,
-                windowHeight: docHeight
+                pixelRatio: 1,
+                skipFonts: false
               });
-
-              var dataUrl = '';
-              try {
-                dataUrl = canvas.toDataURL('image/png');
-              } catch (canvasError) {
-                throw createCaptureError('tainted-canvas', canvasError && canvasError.message ? canvasError.message : 'Canvas export failed.');
-              }
 
               parent.postMessage(
                 {
@@ -3460,8 +3462,8 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
                   success: true,
                   dataUrl: dataUrl,
                   mimeType: 'image/png',
-                  width: canvas.width,
-                  height: canvas.height
+                  width: captureWidth,
+                  height: captureHeight
                 },
                 '*'
               );
@@ -3856,7 +3858,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         var style = document.createElement('style');
         style.textContent = [
           '.bwai-hover{outline:2px dashed #ff3399!important;outline-offset:-2px}',
-          '.bwai-selected{outline:2px solid #ff3399!important;outline-offset:-2px;background-color:rgba(255,51,153,0.04)!important}',
+          '.bwai-selected{outline:2px solid #ff3399!important;outline-offset:-2px;}',
           '.bwai-hidden{opacity:0.25!important;max-height:50px!important;overflow:hidden!important}',
           '.bwai-toolbar{position:absolute;top:10px;left:10px;z-index:99999;display:flex;gap:5px;pointer-events:all}',
           '.bwai-group{display:flex;background:#fff;border:1px solid rgba(0,0,0,0.1);border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.12);overflow:hidden}',
@@ -3871,7 +3873,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           '.bwai-insert-sep{height:1px;background:#f0f0f0;margin:4px 0}',
           '.bwai-insert-custom{color:#888!important;font-style:italic}',
           '.bwai-style-target{outline:2px solid #1d9bf0!important;outline-offset:1px;box-shadow:0 0 0 2px rgba(29,155,240,0.18)!important}',
-          '.bwai-capturing .bwai-hover,.bwai-capturing .bwai-selected{outline:none!important;background:transparent!important}',
+          '.bwai-capturing .bwai-hover,.bwai-capturing .bwai-selected{outline:none!important;}',
           '.bwai-capturing .bwai-style-target{outline:none!important;box-shadow:none!important}',
           '.bwai-capturing .bwai-toolbar,.bwai-capturing .bwai-insert-popup{display:none!important}'
         ].join('');

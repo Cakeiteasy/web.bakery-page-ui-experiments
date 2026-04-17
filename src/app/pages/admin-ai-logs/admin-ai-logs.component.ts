@@ -83,8 +83,48 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
                     <div class="detail-panel">
                       <section class="detail-section">
                         <h3 class="detail-heading">User message</h3>
-                        <pre class="detail-pre">{{ log.lastUserMessage || '(empty)' }}</pre>
+                        <pre class="detail-pre detail-pre--full">{{ log.lastUserMessage || '(empty)' }}</pre>
                       </section>
+
+                      @if (detailLoadingLogId() === log.id) {
+                        <section class="detail-section">
+                          <p class="detail-note">Loading full LLM prompt and raw output…</p>
+                        </section>
+                      } @else if (detailLoadError()[log.id]) {
+                        <section class="detail-section">
+                          <p class="detail-rejection">Could not load full log: {{ detailLoadError()[log.id] }}</p>
+                        </section>
+                      } @else if (detailPayloadLoaded()[log.id]) {
+                        <section class="detail-section">
+                          <h3 class="detail-heading">System prompt (full)</h3>
+                          @if (log.systemPrompt) {
+                            <pre class="detail-pre detail-pre--full">{{ log.systemPrompt }}</pre>
+                          } @else {
+                            <p class="detail-none">Not stored for this log entry.</p>
+                          }
+                        </section>
+
+                        <section class="detail-section">
+                          <h3 class="detail-heading">LLM messages (JSON)</h3>
+                          @if (log.llmRequestMessagesError) {
+                            <p class="detail-rejection">{{ log.llmRequestMessagesError }}</p>
+                          }
+                          @if (log.llmRequestMessagesJson) {
+                            <pre class="detail-pre detail-pre--full">{{ log.llmRequestMessagesJson }}</pre>
+                          } @else if (!log.llmRequestMessagesError) {
+                            <p class="detail-none">No message snapshot stored.</p>
+                          }
+                        </section>
+
+                        <section class="detail-section">
+                          <h3 class="detail-heading">Raw model output</h3>
+                          @if (log.rawModelOutput) {
+                            <pre class="detail-pre detail-pre--full">{{ log.rawModelOutput }}</pre>
+                          } @else {
+                            <p class="detail-none">Not available yet or request ended before completion.</p>
+                          }
+                        </section>
+                      }
 
                       @if (log.requestMeta) {
                         <section class="detail-section">
@@ -102,7 +142,7 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
                       <section class="detail-section">
                         <h3 class="detail-heading">Proposed by AI</h3>
                         @if (log.assistantText) {
-                          <pre class="detail-pre">{{ log.assistantText }}</pre>
+                          <pre class="detail-pre detail-pre--full">{{ log.assistantText }}</pre>
                         }
                         @if (log.edits.length) {
                           <div class="edit-list">
@@ -116,7 +156,7 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
                                   <pre class="edit-search">{{ edit.search }}</pre>
                                 }
                                 @if (edit.value) {
-                                  <pre class="edit-value">{{ truncate(edit.value, 1200) }}</pre>
+                                  <pre class="edit-value">{{ edit.value }}</pre>
                                 }
                               </div>
                             }
@@ -398,6 +438,10 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
       overflow-y: auto;
     }
 
+    .detail-pre--full {
+      max-height: min(70vh, 1200px);
+    }
+
     .detail-list { margin: 0; padding-left: 20px; font-size: 0.85rem; }
     .detail-rejection { margin: 0; color: #721c24; font-size: 0.85rem; }
     .detail-none { margin: 0; color: #888; font-size: 0.85rem; font-style: italic; }
@@ -461,7 +505,7 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
       white-space: pre-wrap;
       word-break: break-all;
       margin: 4px 0 0;
-      max-height: 120px;
+      max-height: min(50vh, 480px);
       overflow-y: auto;
     }
     .edit-value {
@@ -473,7 +517,7 @@ import { BwaiAiLogService } from '../../services/bwai-ai-log.service';
       white-space: pre-wrap;
       word-break: break-all;
       margin: 6px 0 0;
-      max-height: 180px;
+      max-height: min(70vh, 900px);
       overflow-y: auto;
     }
 
@@ -595,6 +639,10 @@ export class AdminAiLogsComponent implements OnInit {
   readonly loadingMore = signal(false);
   readonly expandedLogId = signal<string | null>(null);
   readonly hasMore = signal(false);
+  /** After successful GET ?id= merge, true for that log id. */
+  readonly detailPayloadLoaded = signal<Record<string, boolean>>({});
+  readonly detailLoadingLogId = signal<string | null>(null);
+  readonly detailLoadError = signal<Record<string, string>>({});
 
   statusFilter = 'all';
   slugFilter = '';
@@ -616,7 +664,12 @@ export class AdminAiLogsComponent implements OnInit {
   }
 
   onToggleExpand(id: string): void {
-    this.expandedLogId.set(this.expandedLogId() === id ? null : id);
+    if (this.expandedLogId() === id) {
+      this.expandedLogId.set(null);
+      return;
+    }
+    this.expandedLogId.set(id);
+    void this.ensureFullLogLoaded(id);
   }
 
   onLoadMore(): void {
@@ -631,10 +684,26 @@ export class AdminAiLogsComponent implements OnInit {
     return log.applyResults?.filter(r => r.status !== 'matched').length ?? 0;
   }
 
-  truncate(value: string | null | undefined, maxLength = 1200): string {
-    if (!value) return '';
-    if (value.length <= maxLength) return value;
-    return value.slice(0, maxLength) + '\n…(truncated)';
+  private async ensureFullLogLoaded(id: string): Promise<void> {
+    if (this.detailPayloadLoaded()[id]) {
+      return;
+    }
+    this.detailLoadingLogId.set(id);
+    this.detailLoadError.update((m) => {
+      const next = { ...m };
+      delete next[id];
+      return next;
+    });
+    try {
+      const full = await this.aiLogService.getLogAsync(id);
+      this.logs.update((logs) => logs.map((l) => (l.id === id ? { ...l, ...full } : l)));
+      this.detailPayloadLoaded.update((m) => ({ ...m, [id]: true }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error.';
+      this.detailLoadError.update((m) => ({ ...m, [id]: message }));
+    } finally {
+      this.detailLoadingLogId.set(null);
+    }
   }
 
   private async loadLogs(options?: { append: boolean }): Promise<void> {
@@ -643,6 +712,9 @@ export class AdminAiLogsComponent implements OnInit {
     } else {
       this.loading.set(true);
       this.lastCreatedAt = undefined;
+      this.expandedLogId.set(null);
+      this.detailPayloadLoaded.set({});
+      this.detailLoadError.set({});
     }
 
     try {

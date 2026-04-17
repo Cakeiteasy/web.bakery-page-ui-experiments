@@ -49,7 +49,7 @@ export class BwaiPageService {
 
   saveVersion(
     pageId: string,
-    data: { files: BuildWithAiEditableFiles; diff?: string; status?: 'applied' | 'rejected'; label?: string }
+    data: { files: BuildWithAiEditableFiles; diff?: string; status?: 'applied' | 'rejected' | 'partial'; label?: string }
   ): Observable<BwaiPageVersion> {
     return this.http.post<BwaiPageVersion>(`/api/page-versions?pageId=${pageId}`, data);
   }
@@ -93,7 +93,7 @@ export class BwaiPageService {
 
   async saveVersionAsync(
     pageId: string,
-    data: { files: BuildWithAiEditableFiles; diff?: string; status?: 'applied' | 'rejected'; label?: string }
+    data: { files: BuildWithAiEditableFiles; diff?: string; status?: 'applied' | 'rejected' | 'partial'; label?: string }
   ): Promise<BwaiPageVersion> {
     return firstValueFrom(this.saveVersion(pageId, data));
   }

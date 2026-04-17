@@ -4,6 +4,13 @@ import clientPromise, { dbName } from '../lib/mongodb.js';
 
 const COLLECTION = 'bwai_ai_logs';
 
+/** Omitted from list responses to keep pagination fast; included on GET ?id= */
+const LIST_PROJECTION = {
+  systemPrompt: 0,
+  llmRequestMessagesJson: 0,
+  rawModelOutput: 0
+} as const;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,OPTIONS');
@@ -38,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const pageLimit = Math.min(Number(limit ?? 50), 100);
       const docs = await col
-        .find(filter)
+        .find(filter, { projection: LIST_PROJECTION })
         .sort({ createdAt: -1 })
         .limit(pageLimit + 1)
         .toArray();
@@ -78,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 function toDoc(raw: Record<string, unknown>) {
-  return {
+  const doc: Record<string, unknown> = {
     id: String(raw['_id']),
     pageId: raw['pageId'] ? String(raw['pageId']) : null,
     pageSlug: raw['pageSlug'] ?? null,
@@ -105,6 +112,23 @@ function toDoc(raw: Record<string, unknown>) {
       ? raw['createdAt'].getTime()
       : Number(raw['createdAt'] ?? 0)
   };
+
+  if (raw['systemPrompt'] !== undefined) {
+    doc['systemPrompt'] = raw['systemPrompt'] != null ? String(raw['systemPrompt']) : null;
+  }
+  if (raw['llmRequestMessagesJson'] !== undefined) {
+    doc['llmRequestMessagesJson'] =
+      raw['llmRequestMessagesJson'] != null ? String(raw['llmRequestMessagesJson']) : null;
+  }
+  if (raw['llmRequestMessagesError'] !== undefined) {
+    doc['llmRequestMessagesError'] =
+      raw['llmRequestMessagesError'] != null ? String(raw['llmRequestMessagesError']) : null;
+  }
+  if (raw['rawModelOutput'] !== undefined) {
+    doc['rawModelOutput'] = raw['rawModelOutput'] != null ? String(raw['rawModelOutput']) : null;
+  }
+
+  return doc;
 }
 
 function normalizeLogEdits(

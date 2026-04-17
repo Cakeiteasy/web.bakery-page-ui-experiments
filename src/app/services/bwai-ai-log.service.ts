@@ -42,6 +42,10 @@ export class BwaiAiLogService {
     return firstValueFrom(this.listLogs(params));
   }
 
+  async getLogAsync(id: string): Promise<BwaiAiLog> {
+    return firstValueFrom(this.getLog(id));
+  }
+
   async updateLogAsync(id: string, payload: BwaiAiLogUpdatePayload): Promise<void> {
     await firstValueFrom(this.updateLog(id, payload));
   }
