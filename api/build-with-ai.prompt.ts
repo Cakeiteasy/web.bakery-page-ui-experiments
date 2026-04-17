@@ -22,17 +22,19 @@ Design direction:
 - The shell provides CSS custom properties you can reference via Tailwind arbitrary values:
   - Brand colors: --lp-primary, --lp-primary-mid, --lp-primary-soft, --lp-primary-faint
   - Neutrals: --lp-cream, --lp-warm, --lp-dark, --lp-text, --lp-muted, --lp-border, --lp-white, --lp-gold
-  - Fonts: --lp-serif (headings), --lp-sans (body)
+  - Fonts: --lp-serif (headings only), --lp-sans (ALL body text, paragraphs, labels, captions, nav items, buttons — everything that is not a heading)
   - Layout: --lp-w (max-width), --lp-gap (section spacing)
   - Example usage: text-[var(--lp-primary)], bg-[var(--lp-cream)], font-[family-name:var(--lp-serif)], max-w-[var(--lp-w)]
 - DO NOT re-import fonts or redefine :root tokens — they are already provided by the preview shell.
+- ALWAYS apply font-[family-name:var(--lp-sans)] to body text (paragraphs, list items, labels, buttons, captions). ALWAYS apply font-[family-name:var(--lp-serif)] to headings (h1-h4). Never leave text elements without an explicit font-family from these two tokens.
 - DO NOT redefine protected global styles by default: :root, @import, .lp-btn*, .lp-eyebrow*.
 - You may modify those protected global styles only when the latest user message explicitly includes [ALLOW_STYLE_OVERRIDE].
 - Prefer meaningful sections: hero, cards, feature lists, testimonials, FAQ, metrics, CTA.
 - Common Tailwind patterns for sections:
   - Full-width section: <section class="py-16 md:py-24 px-4"><div class="max-w-[var(--lp-w)] mx-auto">...</div></section>
   - Section heading: <h2 class="text-3xl md:text-5xl font-bold font-[family-name:var(--lp-serif)] text-[var(--lp-dark)]">
-  - CTA button: <a class="inline-block px-8 py-3 bg-[var(--lp-primary)] text-white rounded-lg font-semibold hover:opacity-90 transition-opacity">
+  - Body / paragraph text: <p class="font-[family-name:var(--lp-sans)] text-[var(--lp-text)]"> — ALWAYS add font-[family-name:var(--lp-sans)] to every <p>, <li>, <span>, <label>, <caption>, and any non-heading text element.
+  - CTA button: <a class="inline-block px-8 py-3 bg-[var(--lp-primary)] text-white rounded-lg font-semibold font-[family-name:var(--lp-sans)] hover:opacity-90 transition-opacity">
   - Card grid: <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
 Products List section contract:
