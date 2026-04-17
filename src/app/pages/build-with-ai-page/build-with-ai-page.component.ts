@@ -812,7 +812,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       if (result.mode === 'ai' && result.description) {
         await new Promise<void>((res) => setTimeout(res, 800)); // brief delay for navigation/load
         this.draftMessage.set(
-          `Build a complete landing page for: ${result.description}. The lp- design system is already in the shell styles (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Keep content.css additive for custom page styling. Do NOT add header, nav, or footer — they are already in the shell.`
+          `Build a complete landing page based on this instruction: ${result.description}. The lp- design system is already in the shell styles (tokens, utilities, section classes). Use lp- classes and --lp-* variables. Keep content.css additive for custom page styling. Do NOT add header, nav, or footer — they are already in the shell.`
         );
         void this.onSend();
       }
@@ -1530,21 +1530,12 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
 
     let prompt = `Insert a "${type}" section${afterText}. Match the existing lp- CSS class naming convention, primary accent (--lp-primary), and design tokens.`;
 
-    if (type === 'Products List (Request)') {
+    if (type === 'Products List') {
       prompt = [
-        `Insert a "Products List (Request)" section${afterText}.`,
+        `Insert a "Products List" section${afterText}.`,
         'Use a contract-based section root exactly like this:',
-        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="request" data-cie-ref-type="city" data-cie-country="NO" data-cie-lang="no" data-cie-show-search="true" data-cie-predefined-category="" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any"><div data-cie-products-list-mount></div></section>',
-        'Do not write custom API fetching code in content.js for this section. The runtime handles requests and sends x-source-header=MARKETPLACE.',
-        'Use data-cie-limit only when the user explicitly asks to cap product count; otherwise omit it for unlimited results.'
-      ].join('\n');
-    } else if (type === 'Products List (Preset)') {
-      prompt = [
-        `Insert a "Products List (Preset)" section${afterText}.`,
-        'Use a contract-based section root exactly like this:',
-        '<section class="lp-products-list" data-cie-component="products-list" data-cie-mode="preset" data-cie-ref-type="bakery" data-cie-ref-name="rosenborg-bakeri" data-cie-category-id="1" data-cie-show-search="false" data-cie-predefined-category="" data-cie-allergen-ids="" data-cie-group-ids="" data-cie-motive="any" data-cie-country="NO" data-cie-lang="no"><div data-cie-products-list-mount></div></section>',
-        'Keep optional filter attributes even when empty. Do not add custom fetch logic in content.js for this section.',
-        'data-cie-category-id is optional only when data-cie-predefined-category is provided.'
+        '<section class="lp-products-list" data-cie-component="products-list" data-cie-country="NO" data-cie-lang="no" data-cie-show-search="true"><div data-cie-products-list-mount></div></section>',
+        'Do not write custom API fetching code in content.js for this section. The runtime handles everything automatically.'
       ].join('\n');
     }
 
@@ -2058,20 +2049,15 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
       '',
       '',
       '[Products List section context]',
-      '- Use data attributes on the section root (no custom fetching in content.js):',
-      '  - data-cie-component="products-list"',
-      '  - data-cie-mode="request" or "preset"',
-      '  - data-cie-ref-type="city" or "bakery"',
-      '  - data-cie-ref-name OR data-cie-bakery-id',
-      '  - data-cie-category-id (optional when data-cie-predefined-category is set)',
-      '  - optional: data-cie-show-search, data-cie-predefined-category, data-cie-allergen-ids, data-cie-group-ids, data-cie-motive, data-cie-limit, data-cie-country, data-cie-lang',
-      '- Runtime behavior:',
-      '  - data-cie-predefined-category locks category and hides tabs.',
-      '  - Missing predefined-category match shows no products (no hard runtime error).',
-      '  - Omit data-cie-limit for unlimited products; include it only when an explicit cap is needed.',
+      '- Renders a search bar for finding cities or bakeries. Clicking a result opens its page on cakeiteasy.no.',
+      '- Data attributes on the section root (no custom fetching in content.js):',
+      '  - data-cie-component="products-list" (required)',
+      '  - data-cie-show-search="true" (shows search input, defaults to true)',
+      '  - data-cie-country="NO" (country code, defaults to NO)',
+      '  - data-cie-lang="no" (language, defaults to no)',
       '- Runtime layout hooks:',
-      '  - classes: .cie-products-list-shell, .cie-products-list, .cie-products-list__search-area, .cie-products-list__tabs, .cie-products-list__grid, .cie-products-list__card, .cie-products-list__empty, .cie-products-list__status',
-      '  - vars: --ciepl-surface, --ciepl-surface-soft, --ciepl-surface-muted, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint'
+      '  - classes: .cie-products-list-shell, .cie-products-list__search-area, .cie-products-list__input, .cie-products-list__dropdown, .cie-products-list__dropdown-item',
+      '  - vars: --ciepl-surface, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint'
     ].join('\n');
   }
 
@@ -2835,7 +2821,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
         var styleEditorState = null;
         var lastStyleTarget = null;
 
-        var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form','Products List (Request)','Products List (Preset)'];
+        var INSERT_TYPES = ['Hero','Feature Cards','Testimonials','Stats Bar','FAQ','CTA Banner','Logo Cloud','Contact Form','Products List'];
 
         /* ── helpers ── */
         function getCleanOuterHtml(el) {
@@ -3128,12 +3114,7 @@ export class BuildWithAiPageComponent implements OnInit, OnDestroy {
           if (explicit) return truncateText(explicit, 48);
 
           var component = normalizeText(el.getAttribute('data-cie-component')).toLowerCase();
-          if (component === 'products-list') {
-            var mode = normalizeText(el.getAttribute('data-cie-mode')).toLowerCase();
-            if (mode === 'request') return 'Products List (Request)';
-            if (mode === 'preset') return 'Products List (Preset)';
-            return 'Products List';
-          }
+          if (component === 'products-list') return 'Products List';
 
           var semantic = inferSemanticLabel(classes);
           var headingEl = el.querySelector('h1,h2,h3,h4,h5,h6');

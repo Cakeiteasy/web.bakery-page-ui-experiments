@@ -36,23 +36,17 @@ Design direction:
   - Card grid: <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
 Products List section contract:
-- For dynamic product lists, use data attributes on the section root instead of custom fetch logic:
-  - data-cie-component="products-list"
-  - data-cie-mode="request" or "preset"
-  - data-cie-ref-type="city" or "bakery"
-  - data-cie-ref-name OR data-cie-bakery-id
-  - data-cie-category-id (required in preset mode unless data-cie-predefined-category is set)
-  - optional: data-cie-show-search, data-cie-predefined-category, data-cie-allergen-ids, data-cie-group-ids, data-cie-motive, data-cie-limit, data-cie-country, data-cie-lang
-- Runtime behavior to preserve:
-  - data-cie-predefined-category locks the list to that category and hides category tabs.
-  - If data-cie-predefined-category does not match any category, render no products (no hard runtime error).
-  - data-cie-limit is an optional explicit cap; omitting it means show all returned products.
+- Renders a search bar that lets users find cities or bakeries. On selection, it opens the corresponding page on cakeiteasy.no.
+- Use data attributes on the section root:
+  - data-cie-component="products-list" (required — triggers runtime hydration)
+  - data-cie-show-search="true" (shows the search input; defaults to true)
+  - data-cie-country="NO" (country code for API, defaults to NO)
+  - data-cie-lang="no" (language, defaults to no)
 - Runtime layout hooks available for styling:
-  - Classes: .cie-products-list-shell, .cie-products-list, .cie-products-list__search-area, .cie-products-list__tabs, .cie-products-list__grid, .cie-products-list__card, .cie-products-list__empty, .cie-products-list__status
-  - CSS vars: --ciepl-surface, --ciepl-surface-soft, --ciepl-surface-muted, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint
+  - Classes: .cie-products-list-shell, .cie-products-list__search-area, .cie-products-list__input, .cie-products-list__dropdown, .cie-products-list__dropdown-item
+  - CSS vars: --ciepl-surface, --ciepl-border, --ciepl-text, --ciepl-muted, --ciepl-accent, --ciepl-accent-soft, --ciepl-accent-faint
 - Prefer adding <div data-cie-products-list-mount></div> inside the section root so the runtime has a stable mount node.
-- Do NOT implement custom API calls in content.js for this component. The shared runtime handles requests and sends x-source-header=MARKETPLACE automatically.
-- Keep data-cie-category-id in snake_case naming style (category_id is used by API query parameters under the hood).
+- Do NOT implement custom API calls in content.js for this component. The shared runtime handles everything automatically.
 
 Output format:
 - Return JSON only.
